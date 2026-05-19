@@ -116,13 +116,19 @@ new_query = '&'.join(f"{k}={v[0]}" for k, v in query.items())
 db_url_parsed = parsed._replace(query=new_query)
 db_url_ssl = db_url_parsed.geturl()
 
+# Create SSL context that doesn't verify CA cert (for self-signed certs)
+import ssl
+ssl_context = ssl.create_default_context()
+ssl_context.check_hostname = False
+ssl_context.verify_mode = ssl.CERT_NONE
+
 engine = create_async_engine(
     db_url_ssl,
     echo=False,
     pool_pre_ping=True,
     pool_size=20,
     max_overflow=10,
-    connect_args={"ssl": "require"},
+    connect_args={"ssl": ssl_context},
 )
 
 
