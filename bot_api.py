@@ -47,7 +47,7 @@ async def send_message(chat_id: str, text: str, keyboard: Optional[List[List[str
         return False
 
 
-async def parse_webhook_payload(data: dict) -> tuple[str, str, str]:
+def parse_webhook_payload(data: dict) -> tuple[str, str, str]:
     message = data.get("message", {})
     from_user = message.get("from", {})
 
