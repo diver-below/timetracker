@@ -1,0 +1,22 @@
+[Unit]
+Description=Time Tracker Bot (Yandex Messenger)
+After=network-online.target postgresql.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=timetracker_bot
+Group=timetracker_bot
+WorkingDirectory=/opt/timetracker-bot
+EnvironmentFile=/etc/timetracker-bot/env
+ExecStart=/opt/timetracker-bot/venv/bin/python main.py
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/opt/timetracker-bot /var/log
+
+[Install]
+WantedBy=multi-user.target

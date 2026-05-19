@@ -1,0 +1,5 @@
+aiohttp==3.9.5
+sqlalchemy[asyncio]==2.0.31
+asyncpg==0.29.0
+cryptography==42.0.8
+python-dotenv==1.0.1
