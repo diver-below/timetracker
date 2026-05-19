@@ -2,7 +2,9 @@ import os
 import logging
 from dotenv import load_dotenv
 
+# Try loading from multiple locations
 load_dotenv()
+load_dotenv('/etc/timetracker-bot/env')
 
 YANDEX_OAUTH_TOKEN = os.getenv("YANDEX_OAUTH_TOKEN")
 DATABASE_URL = os.getenv("DATABASE_URL")
