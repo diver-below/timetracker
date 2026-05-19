@@ -101,12 +101,28 @@ class Reminder(Base):
     user: Mapped["User"] = relationship("User", back_populates="reminders")
 
 
+# Parse DATABASE_URL and add SSL for asyncpg
+from urllib.parse import urlparse, parse_qs
+
+db_url = DATABASE_URL
+parsed = urlparse(db_url)
+query = parse_qs(parsed.query)
+
+# Remove sslmode from query (asyncpg doesn't support it in URL)
+query.pop('sslmode', None)
+
+# Rebuild query string
+new_query = '&'.join(f"{k}={v[0]}" for k, v in query.items())
+db_url_parsed = parsed._replace(query=new_query)
+db_url_ssl = db_url_parsed.geturl()
+
 engine = create_async_engine(
-    DATABASE_URL,
+    db_url_ssl,
     echo=False,
     pool_pre_ping=True,
     pool_size=20,
     max_overflow=10,
+    connect_args={"ssl": "require"},
 )
 
 
