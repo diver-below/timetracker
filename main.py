@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 from aiohttp import web
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
-from config import validate_config, WEBHOOK_URL, LISTEN_PORT, logger
+from config import validate_config, WEBHOOK_URL, LISTEN_PORT, YANDEX_OAUTH_TOKEN, logger
 from db import engine, init_db, get_due_reminders, mark_reminder_done, async_session_factory
 from handlers import process_message
 from bot_api import parse_webhook_payload, send_message
@@ -55,15 +55,17 @@ async def reminder_checker():
 async def register_webhook():
     import aiohttp
 
+    # Yandex Bot API endpoint for setting webhooks
+    webhook_api_url = "https://botapi.messenger.yandex.net/api/v1/setWebhook"
+
     async with aiohttp.ClientSession() as session:
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Authorization": f"OAuth {YANDEX_OAUTH_TOKEN}",
+            "Content-Type": "application/json"
+        }
         payload = {"webhook_url": WEBHOOK_URL}
 
-        async with session.post(
-            f"{WEBHOOK_URL.rsplit('/', 1)[0]}/setWebhook",
-            json=payload,
-            headers=headers
-        ) as response:
+        async with session.post(webhook_api_url, json=payload, headers=headers) as response:
             if response.status == 200:
                 logger.info(f"Webhook registered successfully: {WEBHOOK_URL}")
             else:
@@ -74,6 +76,7 @@ async def register_webhook():
 async def on_startup(app: web.Application):
     validate_config()
     await init_db()
+    await register_webhook()
     logger.info("Bot started")
     app["reminder_task"] = asyncio.create_task(reminder_checker())
 

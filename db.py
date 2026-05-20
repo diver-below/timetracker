@@ -31,7 +31,7 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
-    yandex_user_login: Mapped[str] = mapped_column(BigInteger, unique=True, nullable=False)
+    yandex_user_login: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     scheduled_work_start: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     scheduled_work_end: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
 
@@ -166,18 +166,13 @@ async def get_session() -> AsyncSession:
 
 async def get_or_create_user(user_login: str, name: str = None) -> tuple[User, bool]:
     async with async_session_factory() as session:
-        try:
-            int_login = int(user_login)
-        except ValueError:
-            int_login = user_login
-
         result = await session.execute(
-            select(User).where(User.yandex_user_login == int_login)
+            select(User).where(User.yandex_user_login == user_login)
         )
         user = result.scalar_one_or_none()
 
         if user is None:
-            user = User(yandex_user_login=int_login, name=name or "")
+            user = User(yandex_user_login=user_login, name=name or "")
             session.add(user)
             await session.flush()
 

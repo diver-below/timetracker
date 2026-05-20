@@ -48,14 +48,19 @@ async def send_message(chat_id: str, text: str, keyboard: Optional[List[List[str
 
 
 def parse_webhook_payload(data: dict) -> tuple[str, str, str]:
-    message = data.get("message", {})
-    from_user = message.get("from", {})
+    updates = data.get("updates", [])
+    if not updates:
+        return "", "", ""
 
-    user_login = from_user.get("user_id", from_user.get("login", ""))
-    chat_id = message.get("chat_id", "")
-    text = message.get("text", "")
+    update = updates[0]
+    from_user = update.get("from", {})
+    chat = update.get("chat", {})
 
-    if "payload" in message:
-        text = message["payload"].get("text", text)
+    user_login = from_user.get("login", from_user.get("id", ""))
+    chat_id = chat.get("id", "")
+    text = update.get("text", "")
+
+    if "payload" in update:
+        text = update["payload"].get("text", text)
 
     return user_login, chat_id, text
