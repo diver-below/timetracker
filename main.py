@@ -58,19 +58,22 @@ async def register_webhook():
     # Yandex Bot API endpoint for setting webhooks
     webhook_api_url = "https://botapi.messenger.yandex.net/api/v1/setWebhook"
 
-    async with aiohttp.ClientSession() as session:
-        headers = {
-            "Authorization": f"OAuth {YANDEX_OAUTH_TOKEN}",
-            "Content-Type": "application/json"
-        }
-        payload = {"webhook_url": WEBHOOK_URL}
+    try:
+        async with aiohttp.ClientSession() as session:
+            headers = {
+                "Authorization": f"OAuth {YANDEX_OAUTH_TOKEN}",
+                "Content-Type": "application/json"
+            }
+            payload = {"webhook_url": WEBHOOK_URL}
 
-        async with session.post(webhook_api_url, json=payload, headers=headers) as response:
-            if response.status == 200:
-                logger.info(f"Webhook registered successfully: {WEBHOOK_URL}")
-            else:
-                error_text = await response.text()
-                logger.error(f"Failed to register webhook: {response.status} - {error_text}")
+            async with session.post(webhook_api_url, json=payload, headers=headers, timeout=10) as response:
+                if response.status == 200:
+                    logger.info(f"Webhook registered successfully: {WEBHOOK_URL}")
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Failed to register webhook: {response.status} - {error_text}")
+    except Exception as e:
+        logger.error(f"Error registering webhook: {e}")
 
 
 async def on_startup(app: web.Application):
