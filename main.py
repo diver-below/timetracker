@@ -35,6 +35,33 @@ async def health_handler(request: web.Request) -> web.Response:
     return web.json_response({"status": "healthy", "timestamp": datetime.utcnow().isoformat()})
 
 
+async def test_yandex_api_handler(request: web.Request) -> web.Response:
+    """Test connectivity to Yandex Bot API"""
+    import aiohttp
+    import ssl
+
+    try:
+        ssl_context = ssl.create_default_context()
+        connector = aiohttp.TCPConnector(ssl=ssl_context)
+
+        async with aiohttp.ClientSession(connector=connector) as session:
+            # Simple test request to check if we can reach Yandex
+            async with session.get("https://botapi.messenger.yandex.net/", timeout=5) as response:
+                result = {
+                    "status": "ok",
+                    "yandex_reachable": True,
+                    "response_status": response.status
+                }
+                return web.json_response(result)
+    except Exception as e:
+        return web.json_response({
+            "status": "error",
+            "yandex_reachable": False,
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
+
+
 async def reminder_checker():
     logger.info("Reminder checker started")
     while True:
@@ -100,6 +127,7 @@ def main():
     app = web.Application()
     app.router.add_post("/webhook", webhook_handler)
     app.router.add_get("/health", health_handler)
+    app.router.add_get("/test-yandex-api", test_yandex_api_handler)
 
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)

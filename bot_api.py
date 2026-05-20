@@ -1,6 +1,10 @@
 import aiohttp
+import ssl
 from typing import List, Optional
 from config import YANDEX_OAUTH_TOKEN, BOT_API_URL, logger
+
+# SSL context for outgoing connections (verify Yandex's cert)
+ssl_context = ssl.create_default_context()
 
 
 def format_keyboard(buttons: Optional[List[List[str]]]) -> Optional[dict]:
@@ -32,9 +36,13 @@ async def send_message(chat_id: str, text: str, keyboard: Optional[List[List[str
         "Content-Type": "application/json"
     }
 
+    connector = aiohttp.TCPConnector(ssl=ssl_context)
+
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(BOT_API_URL, json=payload, headers=headers) as response:
+        async with aiohttp.ClientSession(connector=connector) as session:
+            logger.info(f"Sending message to Yandex API: {BOT_API_URL}")
+            async with session.post(BOT_API_URL, json=payload, headers=headers, timeout=10) as response:
+                logger.info(f"Yandex API response status: {response.status}")
                 if response.status == 200:
                     logger.info(f"Message sent to chat {chat_id}")
                     return True
@@ -42,8 +50,11 @@ async def send_message(chat_id: str, text: str, keyboard: Optional[List[List[str
                     error_text = await response.text()
                     logger.error(f"Failed to send message: {response.status} - {error_text}")
                     return False
+    except aiohttp.ClientConnectorError as e:
+        logger.error(f"Connection error to Yandex API: {e}")
+        return False
     except aiohttp.ClientError as e:
-        logger.error(f"Network error sending message: {e}")
+        logger.error(f"Network error sending message: {type(e).__name__}: {e}")
         return False
 
 
