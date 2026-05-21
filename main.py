@@ -83,7 +83,7 @@ async def register_webhook():
     import aiohttp
 
     # Yandex Bot API endpoint for setting webhooks
-    webhook_api_url = "https://botapi.messenger.yandex.net/api/v1/setWebhook"
+    webhook_api_url = "https://botapi.messenger.yandex.net/bot/v1/self/update/"
 
     try:
         async with aiohttp.ClientSession() as session:
@@ -93,9 +93,12 @@ async def register_webhook():
             }
             payload = {"webhook_url": WEBHOOK_URL}
 
+            logger.info(f"Registering webhook: {webhook_api_url}, payload: {payload}")
             async with session.post(webhook_api_url, json=payload, headers=headers, timeout=10) as response:
+                logger.info(f"Webhook registration response status: {response.status}")
                 if response.status == 200:
-                    logger.info(f"Webhook registered successfully: {WEBHOOK_URL}")
+                    result = await response.text()
+                    logger.info(f"Webhook registered successfully: {WEBHOOK_URL}, response: {result}")
                 else:
                     error_text = await response.text()
                     logger.error(f"Failed to register webhook: {response.status} - {error_text}")
