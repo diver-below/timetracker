@@ -13,14 +13,26 @@ def format_keyboard(buttons: Optional[List[List[str]]]) -> Optional[dict]:
 
     # Yandex uses suggest_buttons format
     buttons_list = []
-    for row in buttons:
-        for btn in row:
-            buttons_list.append({
-                "text": btn,
-                "style": "default"
-            })
 
-    return buttons_list
+    # Check if multi-row
+    is_multi_row = len(buttons) > 1 or (len(buttons) == 1 and len(buttons[0]) > 1)
+
+    if is_multi_row:
+        for row in buttons:
+            row_buttons = []
+            for btn in row:
+                row_buttons.append({"title": btn})
+            buttons_list.append(row_buttons)
+    else:
+        for row in buttons:
+            for btn in row:
+                buttons_list.append({"title": btn})
+
+    return {
+        "layout": "true" if is_multi_row else "false",
+        "persist": False,
+        "buttons": buttons_list
+    }
 
 
 async def send_message(login: str, text: str, keyboard: Optional[List[List[str]]] = None) -> bool:
