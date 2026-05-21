@@ -61,6 +61,7 @@ class User(Base):
     yandex_user_login: Mapped[str] = mapped_column(String(255), unique=True, nullable=False)
     scheduled_work_start: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     scheduled_work_end: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
+    roles: Mapped[str] = mapped_column(String(255), nullable=False, default="employee")
 
     current_status: Mapped["CurrentStatus"] = relationship(
         "CurrentStatus", back_populates="user", cascade="all, delete-orphan", uselist=False
@@ -445,6 +446,76 @@ async def split_midnight_sessions() -> int:
 
         await session.commit()
         return count
+
+
+async def get_user_roles(user_id: int) -> list[str]:
+    """Get list of roles for a user."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if user and user.roles:
+            return [role.strip() for role in user.roles.split(",")]
+        return []
+
+
+async def has_role(user_id: int, role: str) -> bool:
+    """Check if user has a specific role."""
+    roles = await get_user_roles(user_id)
+    return role in roles
+
+
+async def add_role(user_id: int, role: str) -> bool:
+    """Add a role to a user. Returns True if added, False if already has role."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            return False
+
+        roles = [r.strip() for r in user.roles.split(",")]
+        if role in roles:
+            return False
+
+        roles.append(role)
+        user.roles = ",".join(roles)
+        await session.commit()
+        return True
+
+
+async def remove_role(user_id: int, role: str) -> bool:
+    """Remove a role from a user. Returns True if removed, False if not found."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if not user:
+            return False
+
+        roles = [r.strip() for r in user.roles.split(",")]
+        if role not in roles:
+            return False
+
+        roles.remove(role)
+        # Keep at least one role
+        if not roles:
+            roles = ["employee"]
+        user.roles = ",".join(roles)
+        await session.commit()
+        return True
+
+
+async def get_user_by_yandex_login(yandex_login: str) -> Optional[User]:
+    """Get user by Yandex login."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(User).where(User.yandex_user_login == yandex_login)
+        )
+        return result.scalar_one_or_none()
 
 
 async def get_due_reminders() -> list[tuple[int, str, str]]:

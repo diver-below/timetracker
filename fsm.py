@@ -26,11 +26,11 @@ class FSM:
 
     def is_valid_transition(self, current_state: str, action: str) -> bool:
         transitions = {
-            UserState.IDLE.value: ["/start", "Начать работу", "/new_rem", "/list_rem", "/del_rem"],
-            UserState.WORKING.value: ["/start", "Закончить", "Перерыв", "Сменить задачу", "/new_rem", "/list_rem", "/del_rem"],
-            UserState.ON_BREAK.value: ["/start", "Вернуться", "/new_rem", "/list_rem", "/del_rem"],
-            UserState.ENTERING_TASK.value: ["/start", "Отмена"],
-            UserState.ENTERING_REMINDER.value: ["/start", "Отмена"],
+            UserState.IDLE.value: ["/start", "Начать работу", "/new_rem", "/list_rem", "/del_rem", "/my_id", "/give_role"],
+            UserState.WORKING.value: ["/start", "Закончить", "Перерыв", "Сменить задачу", "/new_rem", "/list_rem", "/del_rem", "/my_id", "/give_role"],
+            UserState.ON_BREAK.value: ["/start", "Вернуться", "/new_rem", "/list_rem", "/del_rem", "/my_id", "/give_role"],
+            UserState.ENTERING_TASK.value: ["/start", "Отмена", "/my_id"],
+            UserState.ENTERING_REMINDER.value: ["/start", "Отмена", "/my_id"],
         }
         return action in transitions.get(current_state, [])
 

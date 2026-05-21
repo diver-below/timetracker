@@ -8,7 +8,8 @@ from db import (
     UserState, get_or_create_user, get_current_state, update_state,
     create_session, end_session, end_break_session, end_task_session, save_task, get_user_tasks,
     create_reminder, get_active_reminders, delete_all_user_reminders, decrypt_value,
-    get_current_encrypted_task, update_user_name, get_task_name_by_id
+    get_current_encrypted_task, update_user_name, get_task_name_by_id,
+    get_user_roles, has_role, add_role, get_user_by_yandex_login
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
@@ -290,6 +291,49 @@ async def handle_delete_reminders(user_login: str, user_id: int):
     logger.info(f"User {user_login} deleted {count} reminders")
 
 
+async def handle_my_id(user_login: str, user_id: int):
+    current_state, _ = await get_current_state(user_id)
+    keyboard = fsm.get_keyboard_for_state(current_state)
+    await send_message(user_login, f"Ваш ID: {user_id}", keyboard)
+    logger.info(f"User {user_login} requested their ID: {user_id}")
+
+
+async def handle_give_role(user_login: str, user_id: int, args: str):
+    """Admin only: /give_role <user_id> <role>"""
+    # Check if user has admin role
+    is_admin = await has_role(user_id, "admin")
+    if not is_admin:
+        await send_message(user_login, "У вас нет прав для этой команды.")
+        logger.warning(f"Non-admin user {user_login} tried to use /give_role")
+        return
+
+    # Parse arguments
+    parts = args.strip().split()
+    if len(parts) != 2:
+        await send_message(user_login, "Формат: /give_role <user_id> <role>\nДоступные роли: admin, manager")
+        return
+
+    try:
+        target_user_id = int(parts[0])
+    except ValueError:
+        await send_message(user_login, "Неверный формат user_id. Должно быть число.")
+        return
+
+    role = parts[1].lower()
+    if role not in ("admin", "manager"):
+        await send_message(user_login, "Неверная роль. Доступные: admin, manager")
+        return
+
+    # Add role to target user
+    success = await add_role(target_user_id, role)
+    if success:
+        await send_message(user_login, f"Роль '{role}' добавлена пользователю {target_user_id}.")
+        logger.info(f"Admin {user_login} added role '{role}' to user {target_user_id}")
+    else:
+        await send_message(user_login, f"Не удалось добавить роль. У пользователя {target_user_id} уже есть роль '{role}'.")
+        logger.info(f"Admin {user_login} failed to add role '{role}' to user {target_user_id} - already has role")
+
+
 async def handle_cancel(user_login: str, user_id: int, from_state: str):
     # Determine what state to return to based on what we were entering
     is_canceling_task = user_login in entering_task_users
@@ -388,6 +432,10 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_start(user_login, user.id)
             return
 
+        if text == "/my_id":
+            await handle_my_id(user_login, user.id)
+            return
+
         if user_login in entering_task_users:
             if text == "Отмена":
                 await handle_cancel(user_login, user.id, UserState.ENTERING_TASK.value)
@@ -428,6 +476,10 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_list_reminders(user_login, user.id)
         elif action == "/del_rem":
             await handle_delete_reminders(user_login, user.id)
+        elif action == "/my_id":
+            await handle_my_id(user_login, user.id)
+        elif action.startswith("/give_role"):
+            await handle_give_role(user_login, user.id, action.replace("/give_role", ""))
         else:
             await send_message(
                 user_login,
