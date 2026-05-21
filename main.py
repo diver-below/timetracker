@@ -79,6 +79,53 @@ async def reminder_checker():
         await asyncio.sleep(60)
 
 
+async def poll_pending_updates():
+    """Get pending updates that were missed while bot was offline"""
+    import aiohttp
+
+    updates_url = "https://botapi.messenger.yandex.net/bot/v1/updates/"
+    ack_url_template = "https://botapi.messenger.yandex.net/bot/v1/updates/{}/ack/"
+
+    headers = {
+        "Authorization": f"OAuth {YANDEX_OAUTH_TOKEN}"
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            # Get pending updates
+            async with session.get(updates_url, headers=headers, timeout=10) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    updates = data.get("updates", [])
+                    logger.info(f"Found {len(updates)} pending updates")
+
+                    for update in updates:
+                        update_id = update.get("update_id")
+                        if not update_id:
+                            continue
+
+                        # Process the update
+                        try:
+                            user_login, chat_id, text = parse_webhook_payload({"updates": [update]})
+                            if user_login and chat_id:
+                                await process_message(user_login, chat_id, text)
+                                logger.info(f"Processed pending update {update_id}")
+                        except Exception as e:
+                            logger.error(f"Error processing pending update {update_id}: {e}")
+
+                        # Acknowledge the update
+                        ack_url = ack_url_template.format(update_id)
+                        async with session.get(ack_url, headers=headers, timeout=5) as ack_response:
+                            if ack_response.status == 200:
+                                logger.info(f"Acknowledged update {update_id}")
+                            else:
+                                logger.warning(f"Failed to acknowledge update {update_id}: {ack_response.status}")
+                else:
+                    logger.warning(f"Failed to get pending updates: {response.status}")
+    except Exception as e:
+        logger.error(f"Error polling pending updates: {e}")
+
+
 async def register_webhook():
     import aiohttp
 
@@ -109,6 +156,7 @@ async def register_webhook():
 async def on_startup(app: web.Application):
     validate_config()
     await init_db()
+    await poll_pending_updates()  # Get messages sent while bot was offline
     await register_webhook()
     logger.info("Bot started")
     app["reminder_task"] = asyncio.create_task(reminder_checker())
