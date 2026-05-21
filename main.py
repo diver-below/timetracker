@@ -89,21 +89,21 @@ async def reminder_checker():
 
 
 async def midnight_session_checker():
-    """Split sessions that span across midnight. Runs once per day shortly after midnight."""
+    """Split sessions that span across midnight (users are GMT+3). Runs once per day at 21:00-21:05 UTC."""
     logger.info("Midnight session checker started")
-    last_run_date = None
+    last_run_utc_date = None
 
     while True:
         try:
             now = datetime.utcnow()
-            today = now.date()
 
-            # Run once per day, shortly after midnight (00:00:01 - 00:05:00 UTC)
-            if last_run_date != today and now.hour == 0 and now.minute < 5:
-                count = await split_midnight_sessions()
-                if count > 0:
-                    logger.info(f"Split {count} sessions at midnight")
-                last_run_date = today
+            # Run once per day, at 21:00-21:05 UTC (which is 00:00-00:05 GMT+3)
+            if now.hour == 21 and now.minute < 5:
+                if last_run_utc_date != now.date():
+                    count = await split_midnight_sessions()
+                    if count > 0:
+                        logger.info(f"Split {count} sessions at midnight (GMT+3)")
+                    last_run_utc_date = now.date()
 
         except Exception as e:
             logger.error(f"Error in midnight session checker: {e}", exc_info=True)

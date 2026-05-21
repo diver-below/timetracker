@@ -412,13 +412,16 @@ async def delete_all_user_reminders(user_id: int) -> int:
 
 
 async def split_midnight_sessions() -> int:
-    """Split sessions that span across midnight. Returns count of sessions split."""
+    """Split sessions that span across midnight (users are in GMT+3). Returns count of sessions split."""
     now = datetime.utcnow()
-    # Today's midnight (00:00:00)
-    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    # Users' midnight (GMT+3) is 21:00 UTC the previous day
+    # Get current date in GMT+3
+    user_date = (now + timedelta(hours=3)).date()
+    # Convert to UTC midnight (21:00 UTC previous day)
+    midnight = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0) - timedelta(days=1)
 
     async with async_session_factory() as session:
-        # Find all open sessions that started before today's midnight
+        # Find all open sessions that started before today's midnight in GMT+3
         result = await session.execute(
             select(Session)
             .where(Session.end_time.is_(None))
@@ -429,7 +432,7 @@ async def split_midnight_sessions() -> int:
 
         count = 0
         for s in sessions:
-            # Close the old session at midnight
+            # Close the old session at midnight (users' midnight)
             s.end_time = midnight
             # Create a new session starting at midnight
             new_session = Session(
