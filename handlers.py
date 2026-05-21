@@ -122,11 +122,14 @@ async def handle_end_work(user_login: str, user_id: int):
 
 
 async def handle_break(user_login: str, user_id: int):
+    # Get current task_id to preserve it
+    _, current_task_id = await get_current_state(user_id)
     # Close the current task session before starting break
     await end_task_session(user_id)
     # Create break session
     await create_session(user_id, "Break")
-    await update_state(user_id, UserState.ON_BREAK.value)
+    # Preserve task_id in CurrentStatus
+    await update_state(user_id, UserState.ON_BREAK.value, task_id=current_task_id)
 
     await send_message(
         user_login,
