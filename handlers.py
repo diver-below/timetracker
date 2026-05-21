@@ -77,7 +77,9 @@ def parse_reminder_time(text: str) -> Optional[datetime]:
 
 
 def format_time(dt: datetime) -> str:
-    return dt.strftime("%H:%M")
+    # Convert UTC to GMT+3 for display
+    local_dt = dt + timedelta(hours=3)
+    return local_dt.strftime("%H:%M")
 
 
 async def handle_start(user_login: str, user_id: int):
