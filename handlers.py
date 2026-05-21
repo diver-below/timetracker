@@ -25,8 +25,9 @@ class DatabaseError(Exception):
 
 fsm = FSM()
 
-# In-memory tracking for users entering reminders (user_login -> bool)
+# In-memory tracking for users entering reminders/tasks
 entering_reminder_users = set()
+entering_task_users = set()
 
 
 def parse_reminder_time(text: str) -> Optional[datetime]:
@@ -96,13 +97,14 @@ def format_time(dt: datetime) -> str:
 
 async def handle_start(user_login: str, user_id: int):
     entering_reminder_users.discard(user_login)
+    entering_task_users.discard(user_login)
     await update_state(user_id, UserState.IDLE.value)
     await send_message(user_login, "Привет! Я бот для учёта рабочего времени.\n\nНажмите «Начать работу», чтобы приступить.", IDLE_KEYBOARD)
     logger.info(f"User {user_login} sent /start, reset to IDLE")
 
 
 async def handle_begin_work(user_login: str, user_id: int):
-    await update_state(user_id, UserState.ENTERING_TASK.value)
+    entering_task_users.add(user_login)
     await send_message(user_login, "Введите название задачи:", CANCEL_KEYBOARD)
     logger.info(f"User {user_login} entering task name")
 
@@ -112,6 +114,7 @@ async def handle_task_entry(user_login: str, user_id: int, task_name: str):
         await send_message(user_login, "Название задачи не может быть пустым. Попробуйте ещё раз:", CANCEL_KEYBOARD)
         return
 
+    entering_task_users.discard(user_login)
     await create_session(user_id, task_name)
     task_id = await save_task(user_id, task_name)
     await update_state(user_id, UserState.WORKING.value, task_id=task_id)
@@ -180,12 +183,12 @@ async def handle_return_from_break(user_login: str, user_id: int):
             logger.info(f"User {user_login} returned from break, resumed task: {task_name}")
         else:
             # Task id exists but task not found - ask to enter a new task
-            await update_state(user_id, UserState.ENTERING_TASK.value)
+            entering_task_users.add(user_login)
             await send_message(user_login, "Введите название задачи:", CANCEL_KEYBOARD)
             logger.info(f"User {user_login} returned from break but task {current_task_id} not found")
     else:
         # No task id - ask to enter a task name
-        await update_state(user_id, UserState.ENTERING_TASK.value)
+        entering_task_users.add(user_login)
         await send_message(user_login, "Введите название задачи:", CANCEL_KEYBOARD)
         logger.info(f"User {user_login} returned from break with no current task")
 
@@ -195,7 +198,7 @@ async def handle_switch_task(user_login: str, user_id: int):
     old_task = decrypt_value(current_encrypted) if current_encrypted else None
 
     await end_session(user_id)
-    await update_state(user_id, UserState.ENTERING_TASK.value)
+    entering_task_users.add(user_login)
 
     if old_task:
         await send_message(
@@ -273,27 +276,31 @@ async def handle_list_reminders(user_login: str, user_id: int):
 
 async def handle_cancel(user_login: str, user_id: int, from_state: str):
     # Determine what state to return to based on what we were entering
+    is_canceling_task = user_login in entering_task_users
+    is_canceling_reminder = user_login in entering_reminder_users
+
+    if is_canceling_task:
+        entering_task_users.discard(user_login)
+
+    if is_canceling_reminder:
+        entering_reminder_users.discard(user_login)
+
+    # Get current state and task_id from CurrentStatus
+    current_state, current_task_id = await get_current_state(user_id)
+
+    # For task entry: determine if returning to WORKING (had task) or IDLE (starting fresh)
     if from_state == UserState.ENTERING_TASK.value:
-        # User was entering a task - check if they have a current task to return to
-        current_state, current_task_id = await get_current_state(user_id)
         if current_state == UserState.WORKING.value and current_task_id:
             return_state = UserState.WORKING.value
         else:
-            # User was starting from IDLE, return to IDLE
             return_state = UserState.IDLE.value
             await send_message(user_login, "Работа не начата. Чтобы начать работу введите название задачи:", CANCEL_KEYBOARD)
             logger.info(f"User {user_login} cancelled starting work")
             return
-    elif user_login in entering_reminder_users:
-        # User was entering a reminder - return to current state
-        entering_reminder_users.discard(user_login)
-        current_state, _ = await get_current_state(user_id)
-        return_state = current_state if current_state else UserState.IDLE.value
     else:
-        # Fallback
-        return_state = UserState.IDLE.value
+        return_state = current_state if current_state else UserState.IDLE.value
 
-    await update_state(user_id, return_state)
+    # Don't call update_state - cancel doesn't change CurrentStatus
 
     # State names in Russian
     state_names = {
@@ -307,7 +314,6 @@ async def handle_cancel(user_login: str, user_id: int, from_state: str):
 
     # If working, show current task
     if return_state == UserState.WORKING.value:
-        _, current_task_id = await get_current_state(user_id)
         task_name = await get_task_name_by_id(current_task_id) if current_task_id else None
         if task_name:
             message += f"\nТекущая задача: {task_name}"
@@ -366,9 +372,9 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_start(user_login, user.id)
             return
 
-        if current_state == UserState.ENTERING_TASK.value:
+        if user_login in entering_task_users:
             if text == "Отмена":
-                await handle_cancel(user_login, user.id, current_state)
+                await handle_cancel(user_login, user.id, UserState.ENTERING_TASK.value)
             else:
                 await handle_task_entry(user_login, user.id, text)
             return
