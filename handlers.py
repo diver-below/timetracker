@@ -25,6 +25,9 @@ class DatabaseError(Exception):
 
 fsm = FSM()
 
+# In-memory tracking for users entering reminders (user_login -> bool)
+entering_reminder_users = set()
+
 
 def parse_reminder_time(text: str) -> Optional[datetime]:
     text = text.strip().lower()
@@ -33,10 +36,14 @@ def parse_reminder_time(text: str) -> Optional[datetime]:
     # User is in GMT+3, so get current local time
     now_local = now + timedelta(hours=3)
 
-    if "завтра" in text:
+    # Save the check before modifying text
+    has_cherez = "через" in text
+    has_zavtra = "завтра" in text
+
+    if has_zavtra:
         base = now + timedelta(days=1)
         text = text.replace("завтра", "").strip()
-    elif "через" in text:
+    elif has_cherez:
         base = now
         text = text.replace("через", "").strip()
     else:
@@ -60,11 +67,11 @@ def parse_reminder_time(text: str) -> Optional[datetime]:
 
     if target_time is None:
         if hours is not None and minutes is not None:
-            if "завтра" in text or (hours < now_local.hour and "завтра" not in text):
+            if has_zavtra or (hours < now_local.hour and not has_zavtra):
                 base = now + timedelta(days=1)
             # User time is GMT+3, convert to UTC by subtracting 3 hours
             target_time = datetime(base.year, base.month, base.day, hours, minutes) - timedelta(hours=3)
-        elif minutes is not None and "через" in text:
+        elif minutes is not None and has_cherez:
             target_time = now + timedelta(minutes=minutes)
 
     if target_time:
@@ -88,6 +95,7 @@ def format_time(dt: datetime) -> str:
 
 
 async def handle_start(user_login: str, user_id: int):
+    entering_reminder_users.discard(user_login)
     await update_state(user_id, UserState.IDLE.value)
     await send_message(user_login, "Привет! Я бот для учёта рабочего времени.\n\nНажмите «Начать работу», чтобы приступить.", IDLE_KEYBOARD)
     logger.info(f"User {user_login} sent /start, reset to IDLE")
@@ -205,7 +213,7 @@ async def handle_switch_task(user_login: str, user_id: int):
 
 
 async def handle_new_reminder_start(user_login: str, user_id: int):
-    await update_state(user_id, UserState.ENTERING_REMINDER.value)
+    entering_reminder_users.add(user_login)
     await send_message(
         user_login,
         "Напишите напоминание в формате: «<время> <текст>»\n"
@@ -219,6 +227,7 @@ async def handle_new_reminder_start(user_login: str, user_id: int):
 
 
 async def handle_reminder_entry(user_login: str, user_id: int, text: str):
+    entering_reminder_users.discard(user_login)
     result = parse_reminder_time(text)
     if not result:
         await send_message(
@@ -229,16 +238,20 @@ async def handle_reminder_entry(user_login: str, user_id: int, text: str):
             "- завтра 10:00 текст",
             CANCEL_KEYBOARD
         )
+        entering_reminder_users.add(user_login)  # Keep in reminder mode
         return
 
     scheduled_time, reminder_text = result
     await create_reminder(user_id, reminder_text, scheduled_time)
-    await update_state(user_id, UserState.IDLE.value)
+
+    # Get current state to show correct keyboard
+    current_state, _ = await get_current_state(user_id)
+    keyboard = fsm.get_keyboard_for_state(current_state)
 
     await send_message(
         user_login,
         f"Напоминание «{reminder_text}» сработает в {format_time(scheduled_time)}.",
-        IDLE_KEYBOARD
+        keyboard
     )
     logger.info(f"User {user_login} created reminder: {reminder_text} at {scheduled_time}")
 
@@ -271,8 +284,9 @@ async def handle_cancel(user_login: str, user_id: int, from_state: str):
             await send_message(user_login, "Работа не начата. Чтобы начать работу введите название задачи:", CANCEL_KEYBOARD)
             logger.info(f"User {user_login} cancelled starting work")
             return
-    elif from_state == UserState.ENTERING_REMINDER.value:
-        # User was entering a reminder - return to previous state
+    elif user_login in entering_reminder_users:
+        # User was entering a reminder - return to current state
+        entering_reminder_users.discard(user_login)
         current_state, _ = await get_current_state(user_id)
         return_state = current_state if current_state else UserState.IDLE.value
     else:
@@ -359,9 +373,9 @@ async def process_message(user_login: str, chat_id: str, text: str):
                 await handle_task_entry(user_login, user.id, text)
             return
 
-        if current_state == UserState.ENTERING_REMINDER.value:
+        if user_login in entering_reminder_users:
             if text == "Отмена":
-                await handle_cancel(user_login, user.id, current_state)
+                await handle_cancel(user_login, user.id, UserState.ENTERING_REMINDER.value)
             else:
                 await handle_reminder_entry(user_login, user.id, text)
             return
