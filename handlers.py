@@ -135,12 +135,27 @@ async def handle_break(user_login: str, user_id: int):
 
 
 async def handle_return_from_break(user_login: str, user_id: int):
+    # Get current task name
+    from sqlalchemy import select as db_select
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            db_select(DBSession.task_name_encrypted)
+            .where(DBSession.user_id == user_id)
+            .where(DBSession.end_time.is_(None))
+            .where(DBSession.task_name_encrypted != "Break")
+            .order_by(DBSession.start_time.desc())
+            .limit(1)
+        )
+        encrypted_name = result.scalar_one_or_none()
+        task_name = decrypt_value(encrypted_name) if encrypted_name else "текущей задачей"
+
     await end_session(user_id)
     await update_state(user_id, UserState.WORKING.value)
 
     await send_message(
         user_login,
-        "Добро пожаловать обратно! Продолжаем работу над задачей.",
+        f"Добро пожаловать обратно! Продолжаем работу над задачей «{task_name}».",
         WORKING_KEYBOARD
     )
     logger.info(f"User {user_login} returned from break")
