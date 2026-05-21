@@ -411,6 +411,39 @@ async def delete_all_user_reminders(user_id: int) -> int:
         return count
 
 
+async def split_midnight_sessions() -> int:
+    """Split sessions that span across midnight. Returns count of sessions split."""
+    now = datetime.utcnow()
+    # Today's midnight (00:00:00)
+    midnight = now.replace(hour=0, minute=0, second=0, microsecond=0)
+
+    async with async_session_factory() as session:
+        # Find all open sessions that started before today's midnight
+        result = await session.execute(
+            select(Session)
+            .where(Session.end_time.is_(None))
+            .where(Session.start_time < midnight)
+            .where(Session.task_name_encrypted != "Break")
+        )
+        sessions = result.scalars().all()
+
+        count = 0
+        for s in sessions:
+            # Close the old session at midnight
+            s.end_time = midnight
+            # Create a new session starting at midnight
+            new_session = Session(
+                user_id=s.user_id,
+                task_name_encrypted=s.task_name_encrypted,
+                start_time=midnight
+            )
+            session.add(new_session)
+            count += 1
+
+        await session.commit()
+        return count
+
+
 async def get_due_reminders() -> list[tuple[int, str, str]]:
     async with async_session_factory() as session:
         from sqlalchemy import and_

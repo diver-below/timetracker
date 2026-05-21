@@ -7,7 +7,7 @@ from aiohttp import web
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from config import validate_config, WEBHOOK_URL, LISTEN_PORT, YANDEX_OAUTH_TOKEN, logger
-from db import engine, init_db, get_due_reminders, mark_reminder_done, async_session_factory
+from db import engine, init_db, get_due_reminders, mark_reminder_done, split_midnight_sessions, async_session_factory
 from handlers import process_message
 from bot_api import parse_webhook_payload, send_message
 
@@ -84,6 +84,29 @@ async def reminder_checker():
 
         except Exception as e:
             logger.error(f"Error in reminder checker: {e}", exc_info=True)
+
+        await asyncio.sleep(60)
+
+
+async def midnight_session_checker():
+    """Split sessions that span across midnight. Runs once per day shortly after midnight."""
+    logger.info("Midnight session checker started")
+    last_run_date = None
+
+    while True:
+        try:
+            now = datetime.utcnow()
+            today = now.date()
+
+            # Run once per day, shortly after midnight (00:00:01 - 00:05:00 UTC)
+            if last_run_date != today and now.hour == 0 and now.minute < 5:
+                count = await split_midnight_sessions()
+                if count > 0:
+                    logger.info(f"Split {count} sessions at midnight")
+                last_run_date = today
+
+        except Exception as e:
+            logger.error(f"Error in midnight session checker: {e}", exc_info=True)
 
         await asyncio.sleep(60)
 
@@ -169,6 +192,7 @@ async def on_startup(app: web.Application):
     await register_webhook()
     logger.info("Bot started")
     app["reminder_task"] = asyncio.create_task(reminder_checker())
+    app["midnight_session_task"] = asyncio.create_task(midnight_session_checker())
 
 
 async def on_shutdown(app: web.Application):
@@ -176,6 +200,13 @@ async def on_shutdown(app: web.Application):
         app["reminder_task"].cancel()
         try:
             await app["reminder_task"]
+        except asyncio.CancelledError:
+            pass
+
+    if "midnight_session_task" in app:
+        app["midnight_session_task"].cancel()
+        try:
+            await app["midnight_session_task"]
         except asyncio.CancelledError:
             pass
 
