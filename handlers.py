@@ -67,21 +67,21 @@ def format_time(dt: datetime) -> str:
     return dt.strftime("%H:%M")
 
 
-async def handle_start(user_login: str, chat_id: str, user_id: int):
+async def handle_start(user_login: str, user_id: int):
     await update_state(user_id, UserState.IDLE.value)
-    await send_message(chat_id, "Привет! Я бот для учёта рабочего времени.\n\nНажмите «Начать работу», чтобы приступить.", IDLE_KEYBOARD)
+    await send_message(user_login, "Привет! Я бот для учёта рабочего времени.\n\nНажмите «Начать работу», чтобы приступить.", IDLE_KEYBOARD)
     logger.info(f"User {user_login} sent /start, reset to IDLE")
 
 
-async def handle_begin_work(user_id: int, chat_id: str):
+async def handle_begin_work(user_login: str, user_id: int):
     await update_state(user_id, UserState.ENTERING_TASK.value)
-    await send_message(chat_id, "Введите название задачи:", CANCEL_KEYBOARD)
-    logger.info(f"User {user_id} entering task name")
+    await send_message(user_login, "Введите название задачи:", CANCEL_KEYBOARD)
+    logger.info(f"User {user_login} entering task name")
 
 
-async def handle_task_entry(user_id: int, chat_id: str, task_name: str):
+async def handle_task_entry(user_login: str, user_id: int, task_name: str):
     if len(task_name.strip()) == 0:
-        await send_message(chat_id, "Название задачи не может быть пустым. Попробуйте ещё раз:", CANCEL_KEYBOARD)
+        await send_message(user_login, "Название задачи не может быть пустым. Попробуйте ещё раз:", CANCEL_KEYBOARD)
         return
 
     await create_session(user_id, task_name)
@@ -89,14 +89,14 @@ async def handle_task_entry(user_id: int, chat_id: str, task_name: str):
     await update_state(user_id, UserState.WORKING.value, task_id=task_id)
 
     await send_message(
-        chat_id,
+        user_login,
         f"Задача «{task_name}» начата. Удачной работы!",
         WORKING_KEYBOARD
     )
-    logger.info(f"User {user_id} started task: {task_name}")
+    logger.info(f"User {user_login} started task: {task_name}")
 
 
-async def handle_end_work(user_id: int, chat_id: str):
+async def handle_end_work(user_login: str, user_id: int):
     current_encrypted = await get_current_encrypted_task(user_id)
     task_name = decrypt_value(current_encrypted) if current_encrypted else "Текущая задача"
 
@@ -104,38 +104,38 @@ async def handle_end_work(user_id: int, chat_id: str):
     await update_state(user_id, UserState.IDLE.value)
 
     await send_message(
-        chat_id,
+        user_login,
         f"Задача «{task_name}» завершена. Спасибо за работу!",
         IDLE_KEYBOARD
     )
-    logger.info(f"User {user_id} ended work on task: {task_name}")
+    logger.info(f"User {user_login} ended work on task: {task_name}")
 
 
-async def handle_break(user_id: int, chat_id: str):
+async def handle_break(user_login: str, user_id: int):
     await create_session(user_id, "Break")
     await update_state(user_id, UserState.ON_BREAK.value)
 
     await send_message(
-        chat_id,
+        user_login,
         "Перерыв начат. Нажмите «Вернуться», когда будете готовы продолжить работу.",
         ON_BREAK_KEYBOARD
     )
-    logger.info(f"User {user_id} went on break")
+    logger.info(f"User {user_login} went on break")
 
 
-async def handle_return_from_break(user_id: int, chat_id: str):
+async def handle_return_from_break(user_login: str, user_id: int):
     await end_session(user_id)
     await update_state(user_id, UserState.WORKING.value)
 
     await send_message(
-        chat_id,
+        user_login,
         "Добро пожаловать обратно! Продолжаем работу над задачей.",
         WORKING_KEYBOARD
     )
-    logger.info(f"User {user_id} returned from break")
+    logger.info(f"User {user_login} returned from break")
 
 
-async def handle_switch_task(user_id: int, chat_id: str):
+async def handle_switch_task(user_login: str, user_id: int):
     current_encrypted = await get_current_encrypted_task(user_id)
     old_task = decrypt_value(current_encrypted) if current_encrypted else "Текущая задача"
 
@@ -143,17 +143,17 @@ async def handle_switch_task(user_id: int, chat_id: str):
     await update_state(user_id, UserState.ENTERING_TASK.value)
 
     await send_message(
-        chat_id,
+        user_login,
         f"Задача «{old_task}» завершена.\n\nВведите название новой задачи:",
         CANCEL_KEYBOARD
     )
-    logger.info(f"User {user_id} switching from task: {old_task}")
+    logger.info(f"User {user_login} switching from task: {old_task}")
 
 
-async def handle_new_reminder_start(user_id: int, chat_id: str):
+async def handle_new_reminder_start(user_login: str, user_id: int):
     await update_state(user_id, UserState.ENTERING_REMINDER.value)
     await send_message(
-        chat_id,
+        user_login,
         "Напишите напоминание в формате: «<время> <текст>»\n"
         "Примеры:\n"
         "- через 15мин проверить почту\n"
@@ -161,14 +161,14 @@ async def handle_new_reminder_start(user_id: int, chat_id: str):
         "- завтра 10:00 написать отчёт",
         CANCEL_KEYBOARD
     )
-    logger.info(f"User {user_id} entering reminder")
+    logger.info(f"User {user_login} entering reminder")
 
 
-async def handle_reminder_entry(user_id: int, chat_id: str, text: str):
+async def handle_reminder_entry(user_login: str, user_id: int, text: str):
     result = parse_reminder_time(text)
     if not result:
         await send_message(
-            chat_id,
+            user_login,
             "Не удалось распознать время. Попробуйте ещё раз в формате:\n"
             "- через 15мин текст\n"
             "- в 14:30 текст\n"
@@ -182,45 +182,45 @@ async def handle_reminder_entry(user_id: int, chat_id: str, text: str):
     await update_state(user_id, UserState.IDLE.value)
 
     await send_message(
-        chat_id,
+        user_login,
         f"Напоминание «{reminder_text}» сработает в {format_time(scheduled_time)}.",
         IDLE_KEYBOARD
     )
-    logger.info(f"User {user_id} created reminder: {reminder_text} at {scheduled_time}")
+    logger.info(f"User {user_login} created reminder: {reminder_text} at {scheduled_time}")
 
 
-async def handle_list_reminders(user_id: int, chat_id: str):
+async def handle_list_reminders(user_login: str, user_id: int):
     reminders = await get_active_reminders(user_id)
 
     if not reminders:
-        await send_message(chat_id, "У вас нет активных напоминаний.", NO_KEYBOARD)
+        await send_message(user_login, "У вас нет активных напоминаний.", NO_KEYBOARD)
         return
 
     lines = ["Ваши напоминания:"]
     for r in reminders:
         lines.append(f"- {r.text} в {format_time(r.scheduled_time)}")
 
-    await send_message(chat_id, "\n".join(lines), NO_KEYBOARD)
-    logger.info(f"User {user_id} listed reminders")
+    await send_message(user_login, "\n".join(lines), NO_KEYBOARD)
+    logger.info(f"User {user_login} listed reminders")
 
 
-async def handle_cancel(user_id: int, chat_id: str, previous_state: str):
+async def handle_cancel(user_login: str, user_id: int, previous_state: str):
     await update_state(user_id, UserState.IDLE.value)
-    await send_message(chat_id, "Действие отменено.", IDLE_KEYBOARD)
-    logger.info(f"User {user_id} cancelled action from state: {previous_state}")
+    await send_message(user_login, "Действие отменено.", IDLE_KEYBOARD)
+    logger.info(f"User {user_login} cancelled action from state: {previous_state}")
 
 
 async def process_message(user_login: str, chat_id: str, text: str):
     user, is_new = await get_or_create_user(user_login)
 
     if user is None:
-        await send_message(chat_id, "Ошибка при регистрации. Пожалуйста, попробуйте снова.", NO_KEYBOARD)
+        await send_message(user_login, "Ошибка при регистрации. Пожалуйста, попробуйте снова.", NO_KEYBOARD)
         logger.error(f"Failed to create user: {user_login}")
         return
 
     if is_new:
         await send_message(
-            chat_id,
+            user_login,
             "Добро пожаловать! Это ваш первый запуск.\n\n"
             "Пожалуйста, представьтесь (введите ваше имя):",
             NO_KEYBOARD
@@ -231,7 +231,7 @@ async def process_message(user_login: str, chat_id: str, text: str):
     if not user.name:
         await update_user_name(user.id, text.strip())
         await send_message(
-            chat_id,
+            user_login,
             f"Рад знакомству, {text.strip()}!\n\n"
             "Нажмите «Начать работу», когда будете готовы приступить к задачам.",
             IDLE_KEYBOARD
@@ -242,50 +242,50 @@ async def process_message(user_login: str, chat_id: str, text: str):
     current_state, _ = await get_current_state(user.id)
 
     if text == "/start":
-        await handle_start(user_login, chat_id, user.id)
+        await handle_start(user_login, user.id)
         return
 
     if current_state == UserState.ENTERING_TASK.value:
         if text == "Отмена":
-            await handle_cancel(user.id, chat_id, current_state)
+            await handle_cancel(user_login, user.id, current_state)
         else:
-            await handle_task_entry(user.id, chat_id, text)
+            await handle_task_entry(user_login, user.id, text)
         return
 
     if current_state == UserState.ENTERING_REMINDER.value:
         if text == "Отмена":
-            await handle_cancel(user.id, chat_id, current_state)
+            await handle_cancel(user_login, user.id, current_state)
         else:
-            await handle_reminder_entry(user.id, chat_id, text)
+            await handle_reminder_entry(user_login, user.id, text)
         return
 
     action = text
 
     if not fsm.is_valid_transition(current_state, action):
         await send_message(
-            chat_id,
+            user_login,
             "Эта команда недоступна в текущем состоянии.",
             fsm.get_keyboard_for_state(current_state)
         )
         return
 
     if action == "Начать работу":
-        await handle_begin_work(user.id, chat_id)
+        await handle_begin_work(user_login, user.id)
     elif action == "Закончить":
-        await handle_end_work(user.id, chat_id)
+        await handle_end_work(user_login, user.id)
     elif action == "Перерыв":
-        await handle_break(user.id, chat_id)
+        await handle_break(user_login, user.id)
     elif action == "Вернуться":
-        await handle_return_from_break(user.id, chat_id)
+        await handle_return_from_break(user_login, user.id)
     elif action == "Сменить задачу":
-        await handle_switch_task(user.id, chat_id)
+        await handle_switch_task(user_login, user.id)
     elif action == "/new_rem":
-        await handle_new_reminder_start(user.id, chat_id)
+        await handle_new_reminder_start(user_login, user.id)
     elif action == "/list_rem":
-        await handle_list_reminders(user.id, chat_id)
+        await handle_list_reminders(user_login, user.id)
     else:
         await send_message(
-            chat_id,
+            user_login,
             "Не понимаю команду. Используйте кнопки клавиатуры.",
             fsm.get_keyboard_for_state(current_state)
         )

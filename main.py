@@ -68,8 +68,8 @@ async def reminder_checker():
         try:
             due_reminders = await get_due_reminders()
 
-            for reminder_id, text, chat_id in due_reminders:
-                await send_message(chat_id, f"⏰ Напоминание: {text}")
+            for reminder_id, text, user_login in due_reminders:
+                await send_message(user_login, f"⏰ Напоминание: {text}")
                 await mark_reminder_done(reminder_id)
                 logger.info(f"Sent reminder {reminder_id}: {text}")
 

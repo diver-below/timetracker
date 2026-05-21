@@ -3,7 +3,7 @@ import ssl
 from typing import List, Optional
 from config import YANDEX_OAUTH_TOKEN, BOT_API_URL, logger
 
-# SSL context for outgoing connections (verify Yandex's cert)
+# SSL context for outgoing connections
 ssl_context = ssl.create_default_context()
 
 
@@ -11,25 +11,28 @@ def format_keyboard(buttons: Optional[List[List[str]]]) -> Optional[dict]:
     if not buttons:
         return None
 
-    return {
-        "buttons": [
-            [{"action": {"type": "text", "label": btn}, "color": "default"} for btn in row]
-            for row in buttons
-        ],
-        "one_time": False
-    }
+    # Yandex uses suggest_buttons format
+    buttons_list = []
+    for row in buttons:
+        for btn in row:
+            buttons_list.append({
+                "text": btn,
+                "style": "default"
+            })
+
+    return buttons_list
 
 
-async def send_message(chat_id: str, text: str, keyboard: Optional[List[List[str]]] = None) -> bool:
-    keyboard_obj = format_keyboard(keyboard)
+async def send_message(login: str, text: str, keyboard: Optional[List[List[str]]] = None) -> bool:
+    buttons_obj = format_keyboard(keyboard)
 
     payload = {
-        "chat_id": chat_id,
+        "login": login,
         "text": text,
     }
 
-    if keyboard_obj:
-        payload["keyboard"] = keyboard_obj
+    if buttons_obj:
+        payload["suggest_buttons"] = buttons_obj
 
     headers = {
         "Authorization": f"OAuth {YANDEX_OAUTH_TOKEN}",
@@ -40,11 +43,11 @@ async def send_message(chat_id: str, text: str, keyboard: Optional[List[List[str
 
     try:
         async with aiohttp.ClientSession(connector=connector) as session:
-            logger.info(f"Sending message to Yandex API: {BOT_API_URL}")
+            logger.info(f"Sending message to Yandex API for user: {login}")
             async with session.post(BOT_API_URL, json=payload, headers=headers, timeout=10) as response:
                 logger.info(f"Yandex API response status: {response.status}")
                 if response.status == 200:
-                    logger.info(f"Message sent to chat {chat_id}")
+                    logger.info(f"Message sent to user {login}")
                     return True
                 else:
                     error_text = await response.text()
