@@ -23,12 +23,21 @@ async def webhook_handler(request: web.Request) -> web.Response:
             logger.warning("Missing user_login or chat_id in webhook")
             return web.json_response({"status": "error", "message": "Invalid payload"}, status=400)
 
-        await process_message(user_login, chat_id, text)
+        try:
+            await process_message(user_login, chat_id, text)
+            return web.json_response({"status": "ok"})
+        except Exception as e:
+            logger.error(f"Error processing message from {user_login}: {e}", exc_info=True)
+            # Send error message to user if possible
+            try:
+                await send_message(user_login, "Произошла ошибка. Попробуйте еще раз или напишите администратору.")
+            except Exception as send_error:
+                logger.error(f"Failed to send error message to {user_login}: {send_error}")
+            return web.json_response({"status": "error", "message": "Processing failed"}, status=200)  # 200 so Yandex doesn't retry
 
-        return web.json_response({"status": "ok"})
     except Exception as e:
-        logger.error(f"Error processing webhook: {e}", exc_info=True)
-        return web.json_response({"status": "error", "message": str(e)}, status=500)
+        logger.error(f"Error in webhook handler: {e}", exc_info=True)
+        return web.json_response({"status": "error", "message": str(e)}, status=200)  # 200 to avoid Yandex retries
 
 
 async def health_handler(request: web.Request) -> web.Response:

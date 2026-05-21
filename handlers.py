@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta
 from typing import Optional
+import traceback
 
 from config import logger
 from db import (
@@ -10,6 +11,15 @@ from db import (
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
+
+# Custom exceptions
+class ValidationError(Exception):
+    """Raised when user input is invalid."""
+    pass
+
+class DatabaseError(Exception):
+    """Raised when database operation fails."""
+    pass
 
 
 fsm = FSM()
@@ -211,81 +221,103 @@ async def handle_cancel(user_login: str, user_id: int, previous_state: str):
 
 
 async def process_message(user_login: str, chat_id: str, text: str):
-    user, is_new = await get_or_create_user(user_login)
+    try:
+        # Validate input
+        if not user_login or not isinstance(user_login, str):
+            raise ValidationError("Invalid user_login")
+        if not text or not isinstance(text, str):
+            raise ValidationError("Invalid text")
+        if len(text) > 10000:
+            raise ValidationError("Message too long")
 
-    if user is None:
-        await send_message(user_login, "Ошибка при регистрации. Пожалуйста, попробуйте снова.", NO_KEYBOARD)
-        logger.error(f"Failed to create user: {user_login}")
-        return
+        user, is_new = await get_or_create_user(user_login)
 
-    if is_new:
-        await send_message(
-            user_login,
-            "Добро пожаловать! Это ваш первый запуск.\n\n"
-            "Пожалуйста, представьтесь (введите ваше имя):",
-            NO_KEYBOARD
-        )
-        logger.info(f"New user registered: {user_login}")
-        return
+        if user is None:
+            await send_message(user_login, "Ошибка при регистрации. Пожалуйста, попробуйте снова.", NO_KEYBOARD)
+            logger.error(f"Failed to create user: {user_login}")
+            return
 
-    if not user.name:
-        await update_user_name(user.id, text.strip())
-        await send_message(
-            user_login,
-            f"Рад знакомству, {text.strip()}!\n\n"
-            "Нажмите «Начать работу», когда будете готовы приступить к задачам.",
-            IDLE_KEYBOARD
-        )
-        logger.info(f"User {user_login} set name: {text.strip()}")
-        return
+        if is_new:
+            await send_message(
+                user_login,
+                "Добро пожаловать! Это ваш первый запуск.\n\n"
+                "Пожалуйста, представьтесь (введите ваше имя):",
+                NO_KEYBOARD
+            )
+            logger.info(f"New user registered: {user_login}")
+            return
 
-    current_state, _ = await get_current_state(user.id)
+        if not user.name:
+            if text.strip():
+                await update_user_name(user.id, text.strip())
+                await send_message(
+                    user_login,
+                    f"Рад знакомству, {text.strip()}!\n\n"
+                    "Нажмите «Начать работу», когда будете готовы приступить к задачам.",
+                    IDLE_KEYBOARD
+                )
+                logger.info(f"User {user_login} set name: {text.strip()}")
+            else:
+                await send_message(user_login, "Пожалуйста, введите ваше имя.", NO_KEYBOARD)
+            return
 
-    if text == "/start":
-        await handle_start(user_login, user.id)
-        return
+        current_state, _ = await get_current_state(user.id)
 
-    if current_state == UserState.ENTERING_TASK.value:
-        if text == "Отмена":
-            await handle_cancel(user_login, user.id, current_state)
+        if text == "/start":
+            await handle_start(user_login, user.id)
+            return
+
+        if current_state == UserState.ENTERING_TASK.value:
+            if text == "Отмена":
+                await handle_cancel(user_login, user.id, current_state)
+            else:
+                await handle_task_entry(user_login, user.id, text)
+            return
+
+        if current_state == UserState.ENTERING_REMINDER.value:
+            if text == "Отмена":
+                await handle_cancel(user_login, user.id, current_state)
+            else:
+                await handle_reminder_entry(user_login, user.id, text)
+            return
+
+        action = text
+
+        if not fsm.is_valid_transition(current_state, action):
+            await send_message(
+                user_login,
+                "Эта команда недоступна в текущем состоянии.",
+                fsm.get_keyboard_for_state(current_state)
+            )
+            return
+
+        if action == "Начать работу":
+            await handle_begin_work(user_login, user.id)
+        elif action == "Закончить":
+            await handle_end_work(user_login, user.id)
+        elif action == "Перерыв":
+            await handle_break(user_login, user.id)
+        elif action == "Вернуться":
+            await handle_return_from_break(user_login, user.id)
+        elif action == "Сменить задачу":
+            await handle_switch_task(user_login, user.id)
+        elif action == "/new_rem":
+            await handle_new_reminder_start(user_login, user.id)
+        elif action == "/list_rem":
+            await handle_list_reminders(user_login, user.id)
         else:
-            await handle_task_entry(user_login, user.id, text)
-        return
+            await send_message(
+                user_login,
+                "Не понимаю команду. Используйте кнопки клавиатуры.",
+                fsm.get_keyboard_for_state(current_state)
+            )
 
-    if current_state == UserState.ENTERING_REMINDER.value:
-        if text == "Отмена":
-            await handle_cancel(user_login, user.id, current_state)
-        else:
-            await handle_reminder_entry(user_login, user.id, text)
-        return
-
-    action = text
-
-    if not fsm.is_valid_transition(current_state, action):
-        await send_message(
-            user_login,
-            "Эта команда недоступна в текущем состоянии.",
-            fsm.get_keyboard_for_state(current_state)
-        )
-        return
-
-    if action == "Начать работу":
-        await handle_begin_work(user_login, user.id)
-    elif action == "Закончить":
-        await handle_end_work(user_login, user.id)
-    elif action == "Перерыв":
-        await handle_break(user_login, user.id)
-    elif action == "Вернуться":
-        await handle_return_from_break(user_login, user.id)
-    elif action == "Сменить задачу":
-        await handle_switch_task(user_login, user.id)
-    elif action == "/new_rem":
-        await handle_new_reminder_start(user_login, user.id)
-    elif action == "/list_rem":
-        await handle_list_reminders(user_login, user.id)
-    else:
-        await send_message(
-            user_login,
-            "Не понимаю команду. Используйте кнопки клавиатуры.",
-            fsm.get_keyboard_for_state(current_state)
-        )
+    except ValidationError as e:
+        logger.warning(f"Validation error for {user_login}: {e}")
+        await send_message(user_login, "Некорректный ввод. Пожалуйста, попробуйте снова.")
+    except DatabaseError as e:
+        logger.error(f"Database error for {user_login}: {e}")
+        await send_message(user_login, "Ошибка сохранения данных. Попробуйте еще раз.")
+    except Exception as e:
+        logger.error(f"Unexpected error processing message from {user_login}: {e}\n{traceback.format_exc()}")
+        await send_message(user_login, "Произошла непредвиденная ошибка. Попробуйте еще раз.")

@@ -1,10 +1,13 @@
 from datetime import datetime, time
-from typing import Optional
+from typing import Optional, Callable, TypeVar
 from enum import Enum
 import base64
+import asyncio
+from functools import wraps
 
 from cryptography.fernet import Fernet
 from sqlalchemy import String, Integer, BigInteger, Time, ForeignKey, Text, Boolean, DateTime, func, select
+from sqlalchemy.exc import SQLAlchemyError, OperationalError
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.pool import NullPool
@@ -12,6 +15,30 @@ from sqlalchemy.pool import NullPool
 from config import DATABASE_URL, ENCRYPTION_KEY, logger
 
 cipher_suite = Fernet(ENCRYPTION_KEY.encode())
+
+T = TypeVar('T')
+
+
+def retry_db(max_retries: int = 3, backoff: float = 0.5):
+    """Retry decorator for DB operations with exponential backoff."""
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @wraps(func)
+        async def wrapper(*args, **kwargs) -> T:
+            last_error = None
+            for attempt in range(max_retries):
+                try:
+                    return await func(*args, **kwargs)
+                except (OperationalError, SQLAlchemyError) as e:
+                    last_error = e
+                    if attempt < max_retries - 1:
+                        wait_time = backoff * (2 ** attempt)
+                        logger.warning(f"DB error in {func.__name__} (attempt {attempt + 1}/{max_retries}): {e}. Retrying in {wait_time}s...")
+                        await asyncio.sleep(wait_time)
+                    else:
+                        logger.error(f"DB error in {func.__name__} after {max_retries} attempts: {e}")
+            raise last_error
+        return wrapper
+    return decorator
 
 
 class Base(DeclarativeBase):
