@@ -11,7 +11,7 @@ def format_keyboard(buttons: Optional[List[List[str]]]) -> Optional[dict]:
     if not buttons:
         return None
 
-    # Yandex uses suggest_buttons format
+    # Yandex uses suggest_buttons format with SendMessageDirective
     buttons_list = []
 
     # Check if multi-row
@@ -21,12 +21,22 @@ def format_keyboard(buttons: Optional[List[List[str]]]) -> Optional[dict]:
         for row in buttons:
             row_buttons = []
             for btn in row:
-                row_buttons.append({"title": btn})
+                row_buttons.append({
+                    "title": btn,
+                    "directives": [
+                        {"type": "send_message", "text": btn}
+                    ]
+                })
             buttons_list.append(row_buttons)
     else:
         for row in buttons:
             for btn in row:
-                buttons_list.append({"title": btn})
+                buttons_list.append({
+                    "title": btn,
+                    "directives": [
+                        {"type": "send_message", "text": btn}
+                    ]
+                })
 
     return {
         "layout": "true" if is_multi_row else "false",
