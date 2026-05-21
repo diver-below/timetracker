@@ -258,7 +258,7 @@ async def handle_cancel(user_login: str, user_id: int, from_state: str):
         else:
             # User was starting from IDLE, return to IDLE
             return_state = UserState.IDLE.value
-            await send_message(user_login, "Работа не начата. Чтобы начать работу введите название задачи:", IDLE_KEYBOARD)
+            await send_message(user_login, "Работа не начата. Чтобы начать работу введите название задачи:", CANCEL_KEYBOARD)
             logger.info(f"User {user_login} cancelled starting work")
             return
     elif from_state == UserState.ENTERING_REMINDER.value:
