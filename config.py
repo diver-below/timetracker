@@ -13,7 +13,7 @@ LISTEN_PORT = int(os.getenv("LISTEN_PORT", "8443"))
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO")
 
-BOT_API_URL = "https://botapi.messenger.yandex.net/api/v1/sendMessage"
+BOT_API_URL = "https://botapi.messenger.yandex.net/bot/v1/messages/sendText/"
 
 logging.basicConfig(
     level=getattr(logging, LOG_LEVEL),
