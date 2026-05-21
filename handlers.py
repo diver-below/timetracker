@@ -227,10 +227,56 @@ async def handle_list_reminders(user_login: str, user_id: int):
     logger.info(f"User {user_login} listed reminders")
 
 
-async def handle_cancel(user_login: str, user_id: int, previous_state: str):
-    await update_state(user_id, UserState.IDLE.value)
-    await send_message(user_login, "Действие отменено.", IDLE_KEYBOARD)
-    logger.info(f"User {user_login} cancelled action from state: {previous_state}")
+async def handle_cancel(user_login: str, user_id: int, from_state: str):
+    # State names in Russian
+    state_names = {
+        UserState.IDLE.value: "не работает",
+        UserState.WORKING.value: "работает",
+        UserState.ON_BREAK.value: "на перерыве",
+    }
+
+    # Determine what state to return to based on what we were entering
+    if from_state == UserState.ENTERING_TASK.value:
+        # User was entering a new task while working - return to WORKING
+        return_state = UserState.WORKING.value
+    elif from_state == UserState.ENTERING_REMINDER.value:
+        # User was entering a reminder - return to previous state
+        current_state, _ = await get_current_state(user_id)
+        return_state = current_state if current_state else UserState.IDLE.value
+    else:
+        # Fallback
+        return_state = UserState.IDLE.value
+
+    await update_state(user_id, return_state)
+
+    # Build message
+    message = "Действие отменено. Текущий статус: " + state_names.get(return_state, return_state)
+
+    # If working, show current task
+    if return_state == UserState.WORKING.value:
+        from sqlalchemy import select as db_select
+
+        async with async_session_factory() as session:
+            result = await session.execute(
+                db_select(DBSession.task_name_encrypted)
+                .where(DBSession.user_id == user_id)
+                .where(DBSession.end_time.is_(None))
+                .where(DBSession.task_name_encrypted != "Break")
+                .order_by(DBSession.start_time.desc())
+                .limit(1)
+            )
+            encrypted_name = result.scalar_one_or_none()
+            if encrypted_name:
+                task_name = decrypt_value(encrypted_name)
+                message += f"\nТекущая задача: {task_name}"
+
+    # Get appropriate keyboard
+    from fsm import FSM
+    fsm = FSM()
+    keyboard = fsm.get_keyboard_for_state(return_state)
+
+    await send_message(user_login, message, keyboard)
+    logger.info(f"User {user_login} cancelled action from {from_state}, returned to {return_state}")
 
 
 async def process_message(user_login: str, chat_id: str, text: str):
