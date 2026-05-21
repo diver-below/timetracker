@@ -43,7 +43,7 @@ async def send_message(login: str, text: str, keyboard: Optional[List[List[str]]
 
     try:
         async with aiohttp.ClientSession(connector=connector) as session:
-            logger.info(f"Sending message to Yandex API for user: {login}")
+            logger.info(f"Sending message to Yandex API for user: {login}, payload: {payload}")
             async with session.post(BOT_API_URL, json=payload, headers=headers, timeout=10) as response:
                 logger.info(f"Yandex API response status: {response.status}")
                 if response.status == 200:
