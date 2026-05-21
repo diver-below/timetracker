@@ -263,14 +263,14 @@ async def handle_list_reminders(user_login: str, user_id: int):
     reminders = await get_active_reminders(user_id)
 
     if not reminders:
-        await send_message(user_login, "У вас нет активных напоминаний.", NO_KEYBOARD)
+        await send_message(user_login, "У вас нет активных напоминаний.", CANCEL_KEYBOARD)
         return
 
     lines = ["Ваши напоминания:"]
     for r in reminders:
         lines.append(f"- {r.text} в {format_time(r.scheduled_time)}")
 
-    await send_message(user_login, "\n".join(lines), NO_KEYBOARD)
+    await send_message(user_login, "\n".join(lines), CANCEL_KEYBOARD)
     logger.info(f"User {user_login} listed reminders")
 
 
