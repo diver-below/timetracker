@@ -7,7 +7,8 @@ from db import (
     UserState, get_or_create_user, get_current_state, update_state,
     create_session, end_session, save_task, get_user_tasks,
     create_reminder, get_active_reminders, decrypt_value,
-    get_current_encrypted_task, update_user_name
+    get_current_encrypted_task, update_user_name, Session as DBSession,
+    async_session_factory
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
@@ -146,8 +147,20 @@ async def handle_return_from_break(user_login: str, user_id: int):
 
 
 async def handle_switch_task(user_login: str, user_id: int):
-    current_encrypted = await get_current_encrypted_task(user_id)
-    old_task = decrypt_value(current_encrypted) if current_encrypted else "Текущая задача"
+    # Get task name from current session before ending it
+    from sqlalchemy import select as db_select
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            db_select(DBSession.task_name_encrypted)
+            .where(DBSession.user_id == user_id)
+            .where(DBSession.end_time.is_(None))
+            .where(DBSession.task_name_encrypted != "Break")
+            .order_by(DBSession.start_time.desc())
+            .limit(1)
+        )
+        encrypted_name = result.scalar_one_or_none()
+        old_task = decrypt_value(encrypted_name) if encrypted_name else "Текущая задача"
 
     await end_session(user_id)
     await update_state(user_id, UserState.ENTERING_TASK.value)
