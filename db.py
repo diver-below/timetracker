@@ -448,6 +448,50 @@ async def split_midnight_sessions() -> int:
         return count
 
 
+async def get_today_sessions(user_id: int) -> tuple[list[tuple[str, int]], int]:
+    """Get today's (in GMT+3) work sessions per task and total break duration in seconds.
+    Returns: (list of (task_name, duration_seconds), total_break_seconds)"""
+    now = datetime.utcnow()
+    # Today in GMT+3
+    user_date = (now + timedelta(hours=3)).date()
+    # Today's midnight and tomorrow's midnight in UTC
+    midnight_start = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0) - timedelta(days=1)
+    midnight_end = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0)
+
+    async with async_session_factory() as session:
+        # Get all work sessions (not Break) for today
+        sessions_result = await session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .where(Session.start_time >= midnight_start)
+            .where(Session.start_time < midnight_end)
+            .where(Session.end_time.isnot(None()))
+            .where(Session.task_name_encrypted != "Break")
+            .order_by(Session.start_time)
+        )
+        sessions = sessions_result.scalars().all()
+
+        # Group by task name
+        task_durations = {}
+        for s in sessions:
+            task_name = decrypt_value(s.task_name_encrypted)
+            duration = int((s.end_time - s.start_time).total_seconds())
+            task_durations[task_name] = task_durations.get(task_name, 0) + duration
+
+        # Get total break duration
+        break_result = await session.execute(
+            select(func.extract('epoch', func.sum(Session.end_time - Session.start_time)))
+            .where(Session.user_id == user_id)
+            .where(Session.start_time >= midnight_start)
+            .where(Session.start_time < midnight_end)
+            .where(Session.end_time.isnot(None()))
+            .where(Session.task_name_encrypted == "Break")
+        )
+        break_seconds = int(break_result.scalar() or 0)
+
+        return list(task_durations.items()), break_seconds
+
+
 async def get_user_roles(user_id: int) -> list[str]:
     """Get list of roles for a user."""
     async with async_session_factory() as session:

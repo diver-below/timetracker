@@ -9,7 +9,8 @@ from db import (
     create_session, end_session, end_break_session, end_task_session, save_task, get_user_tasks,
     create_reminder, get_active_reminders, delete_all_user_reminders, decrypt_value,
     get_current_encrypted_task, update_user_name, get_task_name_by_id,
-    get_user_roles, has_role, add_role, get_user_by_yandex_login, get_user_by_id
+    get_user_roles, has_role, add_role, get_user_by_yandex_login, get_user_by_id,
+    get_today_sessions
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
@@ -96,6 +97,21 @@ def format_time(dt: datetime) -> str:
     return local_dt.strftime("%H:%M")
 
 
+def format_duration(seconds: int) -> str:
+    """Format duration in seconds to readable format like '1ч30мин', '30мин'."""
+    hours = seconds // 3600
+    minutes = (seconds % 3600) // 60
+
+    if hours > 0 and minutes > 0:
+        return f"{hours}ч{minutes}мин"
+    elif hours > 0:
+        return f"{hours}ч"
+    elif minutes > 0:
+        return f"{minutes}мин"
+    else:
+        return "0мин"
+
+
 async def handle_start(user_login: str, user_id: int):
     entering_reminder_users.discard(user_login)
     entering_task_users.discard(user_login)
@@ -135,9 +151,28 @@ async def handle_end_work(user_login: str, user_id: int):
     await end_session(user_id)
     await update_state(user_id, UserState.IDLE.value)
 
+    # Get today's session summary
+    task_durations, break_seconds = await get_today_sessions(user_id)
+
+    # Format task durations
+    lines = []
+    if task_durations:
+        lines.append("Итоги за сегодня:")
+        for task, duration in task_durations:
+            lines.append(f"- {task} {format_duration(duration)}")
+    else:
+        lines.append("За сегодня работы не было.")
+
+    # Format break duration
+    if break_seconds > 0:
+        lines.append(f"- Перерыв {format_duration(break_seconds)}")
+
+    lines.append("")
+    lines.append("Хорошего дня!")
+
     await send_message(
         user_login,
-        f"Задача «{task_name}» завершена. Спасибо за работу!",
+        "\n".join(lines),
         IDLE_KEYBOARD
     )
     logger.info(f"User {user_login} ended work on task: {task_name}")
