@@ -160,16 +160,23 @@ async def handle_switch_task(user_login: str, user_id: int):
             .limit(1)
         )
         encrypted_name = result.scalar_one_or_none()
-        old_task = decrypt_value(encrypted_name) if encrypted_name else "Текущая задача"
+        old_task = decrypt_value(encrypted_name) if encrypted_name else None
 
     await end_session(user_id)
     await update_state(user_id, UserState.ENTERING_TASK.value)
 
-    await send_message(
-        user_login,
-        f"Задача «{old_task}» завершена.\n\nВведите название новой задачи:",
-        CANCEL_KEYBOARD
-    )
+    if old_task:
+        await send_message(
+            user_login,
+            f"Задача «{old_task}» завершена.\n\nВведите название новой задачи:",
+            CANCEL_KEYBOARD
+        )
+    else:
+        await send_message(
+            user_login,
+            "Введите название новой задачи:",
+            CANCEL_KEYBOARD
+        )
     logger.info(f"User {user_login} switching from task: {old_task}")
 
 
