@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta
 from typing import Optional
 import traceback
+import re
 
 from config import logger
 from db import (
@@ -68,9 +69,13 @@ def parse_reminder_time(text: str) -> Optional[datetime]:
 
     if target_time:
         text_clean = text
-        for num in str(hours or "") + str(minutes or ""):
-            text_clean = text_clean.replace(num, "")
-        text_clean = text_clean.replace(":", "").replace("мин", "").replace("час", "").replace("min", "").replace("h", "").strip()
+        # Remove time pattern (HH:MM or HHччмин)
+        text_clean = re.sub(r'\d{1,2}:\d{2}', '', text_clean)
+        text_clean = re.sub(r'\d+\s*час', '', text_clean)
+        text_clean = re.sub(r'\d+\s*мин', '', text_clean)
+        # Remove keywords and extra spaces
+        text_clean = re.sub(r'(через|мин|час|min|h|:)', '', text_clean, flags=re.IGNORECASE)
+        text_clean = ' '.join(text_clean.split())
         return target_time, text_clean
 
     return None
