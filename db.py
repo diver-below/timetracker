@@ -238,14 +238,19 @@ async def end_session(user_id: int) -> Optional[Session]:
             .where(Session.end_time.is_(None))
             .order_by(Session.start_time.desc())
         )
-        session_obj = result.scalar_one_or_none()
+        sessions = result.scalars().all()
 
-        if session_obj:
-            session_obj.end_time = datetime.utcnow()
-            await session.commit()
-            await session.refresh(session_obj)
-            return session_obj
-        return None
+        if not sessions:
+            return None
+
+        # End all unclosed sessions (there might be duplicates from crash)
+        now = datetime.utcnow()
+        for s in sessions:
+            s.end_time = now
+
+        await session.commit()
+        # Return the most recent one
+        return sessions[0]
 
 
 async def save_task(user_id: int, task_name: str) -> int:
