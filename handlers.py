@@ -29,6 +29,8 @@ def parse_reminder_time(text: str) -> Optional[datetime]:
     text = text.strip().lower()
 
     now = datetime.utcnow()
+    # User is in GMT+3, so get current local time
+    now_local = now + timedelta(hours=3)
 
     if "завтра" in text:
         base = now + timedelta(days=1)
@@ -57,9 +59,10 @@ def parse_reminder_time(text: str) -> Optional[datetime]:
 
     if target_time is None:
         if hours is not None and minutes is not None:
-            if "завтра" in text or (hours < now.hour and "завтра" not in text):
+            if "завтра" in text or (hours < now_local.hour and "завтра" not in text):
                 base = now + timedelta(days=1)
-            target_time = datetime(base.year, base.month, base.day, hours, minutes)
+            # User time is GMT+3, convert to UTC by subtracting 3 hours
+            target_time = datetime(base.year, base.month, base.day, hours, minutes) - timedelta(hours=3)
         elif minutes is not None and "через" in text:
             target_time = now + timedelta(minutes=minutes)
 
