@@ -9,7 +9,7 @@ from db import (
     create_session, end_session, end_break_session, end_task_session, save_task, get_user_tasks,
     create_reminder, get_active_reminders, delete_all_user_reminders, decrypt_value,
     get_current_encrypted_task, update_user_name, get_task_name_by_id,
-    get_user_roles, has_role, add_role, get_user_by_yandex_login
+    get_user_roles, has_role, add_role, get_user_by_yandex_login, get_user_by_id
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
@@ -313,21 +313,31 @@ async def handle_give_role(user_login: str, user_id: int, args: str):
         await send_message(user_login, "Формат: /give_role <user_id> <role>\nДоступные роли: admin, manager")
         return
 
+    # Validate user_id is a number
     try:
         target_user_id = int(parts[0])
     except ValueError:
         await send_message(user_login, "Неверный формат user_id. Должно быть число.")
         return
 
+    # Validate role
     role = parts[1].lower()
     if role not in ("admin", "manager"):
         await send_message(user_login, "Неверная роль. Доступные: admin, manager")
         return
 
+    # Validate target user exists
+    from db import get_user_by_id
+    target_user = await get_user_by_id(target_user_id)
+    if not target_user:
+        await send_message(user_login, f"Пользователь с ID {target_user_id} не найден.")
+        logger.info(f"Admin {user_login} tried to give role to non-existent user {target_user_id}")
+        return
+
     # Add role to target user
     success = await add_role(target_user_id, role)
     if success:
-        await send_message(user_login, f"Роль '{role}' добавлена пользователю {target_user_id}.")
+        await send_message(user_login, f"Роль '{role}' добавлена пользователю {target_user_id} ({target_user.name}).")
         logger.info(f"Admin {user_login} added role '{role}' to user {target_user_id}")
     else:
         await send_message(user_login, f"Не удалось добавить роль. У пользователя {target_user_id} уже есть роль '{role}'.")
