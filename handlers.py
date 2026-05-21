@@ -7,7 +7,7 @@ from db import (
     UserState, get_or_create_user, get_current_state, update_state,
     create_session, end_session, end_break_session, end_task_session, save_task, get_user_tasks,
     create_reminder, get_active_reminders, decrypt_value,
-    get_current_encrypted_task, update_user_name, async_session_factory, get_task_name_by_id
+    get_current_encrypted_task, update_user_name, get_task_name_by_id
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
@@ -249,17 +249,18 @@ async def handle_list_reminders(user_login: str, user_id: int):
 
 
 async def handle_cancel(user_login: str, user_id: int, from_state: str):
-    # State names in Russian
-    state_names = {
-        UserState.IDLE.value: "не работает",
-        UserState.WORKING.value: "работает",
-        UserState.ON_BREAK.value: "на перерыве",
-    }
-
     # Determine what state to return to based on what we were entering
     if from_state == UserState.ENTERING_TASK.value:
-        # User was entering a new task while working - return to WORKING
-        return_state = UserState.WORKING.value
+        # User was entering a task - check if they have a current task to return to
+        current_state, current_task_id = await get_current_state(user_id)
+        if current_state == UserState.WORKING.value and current_task_id:
+            return_state = UserState.WORKING.value
+        else:
+            # User was starting from IDLE, return to IDLE
+            return_state = UserState.IDLE.value
+            await send_message(user_login, "Работа не начата. Чтобы начать работу введите название задачи:", IDLE_KEYBOARD)
+            logger.info(f"User {user_login} cancelled starting work")
+            return
     elif from_state == UserState.ENTERING_REMINDER.value:
         # User was entering a reminder - return to previous state
         current_state, _ = await get_current_state(user_id)
@@ -270,30 +271,24 @@ async def handle_cancel(user_login: str, user_id: int, from_state: str):
 
     await update_state(user_id, return_state)
 
+    # State names in Russian
+    state_names = {
+        UserState.IDLE.value: "не работает",
+        UserState.WORKING.value: "работает",
+        UserState.ON_BREAK.value: "на перерыве",
+    }
+
     # Build message
     message = "Действие отменено. Текущий статус: " + state_names.get(return_state, return_state)
 
     # If working, show current task
     if return_state == UserState.WORKING.value:
-        from sqlalchemy import select as db_select
-
-        async with async_session_factory() as session:
-            result = await session.execute(
-                db_select(DBSession.task_name_encrypted)
-                .where(DBSession.user_id == user_id)
-                .where(DBSession.end_time.is_(None))
-                .where(DBSession.task_name_encrypted != "Break")
-                .order_by(DBSession.start_time.desc())
-                .limit(1)
-            )
-            encrypted_name = result.scalar_one_or_none()
-            if encrypted_name:
-                task_name = decrypt_value(encrypted_name)
-                message += f"\nТекущая задача: {task_name}"
+        _, current_task_id = await get_current_state(user_id)
+        task_name = await get_task_name_by_id(current_task_id) if current_task_id else None
+        if task_name:
+            message += f"\nТекущая задача: {task_name}"
 
     # Get appropriate keyboard
-    from fsm import FSM
-    fsm = FSM()
     keyboard = fsm.get_keyboard_for_state(return_state)
 
     await send_message(user_login, message, keyboard)
