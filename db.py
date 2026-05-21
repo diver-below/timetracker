@@ -610,3 +610,50 @@ async def update_user_name(user_id: int, name: str):
         if user:
             user.name = name
             await session.commit()
+
+
+async def get_all_users_today_sessions() -> list[dict]:
+    """Get today's (in GMT+3) work sessions for all users.
+    Returns list of dicts: {user_id, user_name, task_durations, break_seconds}"""
+    now = datetime.utcnow()
+    # Today in GMT+3
+    user_date = (now + timedelta(hours=3)).date()
+    # Today's midnight and tomorrow's midnight in UTC
+    midnight_start = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0) - timedelta(days=1)
+    midnight_end = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0)
+
+    async with async_session_factory() as session:
+        # Get all sessions for today with user info
+        from sqlalchemy import and_
+
+        result = await session.execute(
+            select(Session, User)
+            .join(User, Session.user_id == User.id)
+            .where(Session.start_time >= midnight_start)
+            .where(Session.start_time < midnight_end)
+            .where(Session.end_time.isnot(None))
+            .order_by(User.id, Session.start_time)
+        )
+        session_data = result.all()
+
+        # Group by user
+        user_data = {}
+        for session, user in session_data:
+            if user.id not in user_data:
+                user_data[user.id] = {
+                    "user_id": user.id,
+                    "user_name": user.name or f"User {user.id}",
+                    "task_durations": {},
+                    "break_seconds": 0
+                }
+
+            duration = int((session.end_time - session.start_time).total_seconds())
+            if session.task_name_encrypted == "Break":
+                user_data[user.id]["break_seconds"] += duration
+            else:
+                task_name = decrypt_value(session.task_name_encrypted)
+                user_data[user.id]["task_durations"][task_name] = (
+                    user_data[user.id]["task_durations"].get(task_name, 0) + duration
+                )
+
+        return list(user_data.values())

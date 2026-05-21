@@ -10,6 +10,7 @@ from config import validate_config, WEBHOOK_URL, LISTEN_PORT, YANDEX_OAUTH_TOKEN
 from db import engine, init_db, get_due_reminders, mark_reminder_done, split_midnight_sessions, async_session_factory
 from handlers import process_message
 from bot_api import parse_webhook_payload, send_message
+from reports import send_daily_report_to_manager, get_managers_logins
 
 
 async def webhook_handler(request: web.Request) -> web.Response:
@@ -111,6 +112,35 @@ async def midnight_session_checker():
         await asyncio.sleep(60)
 
 
+async def daily_report_checker():
+    """Send daily reports to all managers at 17:00 UTC (8pm GMT+3)."""
+    logger.info("Daily report checker started")
+    last_run_utc_date = None
+
+    while True:
+        try:
+            now = datetime.utcnow()
+
+            # Run once per day, at 17:00-17:05 UTC (which is 20:00-20:05 GMT+3)
+            if now.hour == 17 and now.minute < 5:
+                if last_run_utc_date != now.date():
+                    managers = await get_managers_logins()
+                    logger.info(f"Sending daily reports to {len(managers)} managers")
+
+                    for user_id, user_login in managers:
+                        try:
+                            await send_daily_report_to_manager(user_login, user_id)
+                        except Exception as e:
+                            logger.error(f"Failed to send daily report to {user_login}: {e}", exc_info=True)
+
+                    last_run_utc_date = now.date()
+
+        except Exception as e:
+            logger.error(f"Error in daily report checker: {e}", exc_info=True)
+
+        await asyncio.sleep(60)
+
+
 async def poll_pending_updates():
     """Get pending updates that were missed while bot was offline"""
     import aiohttp
@@ -193,6 +223,7 @@ async def on_startup(app: web.Application):
     logger.info("Bot started")
     app["reminder_task"] = asyncio.create_task(reminder_checker())
     app["midnight_session_task"] = asyncio.create_task(midnight_session_checker())
+    app["daily_report_task"] = asyncio.create_task(daily_report_checker())
 
 
 async def on_shutdown(app: web.Application):
@@ -207,6 +238,13 @@ async def on_shutdown(app: web.Application):
         app["midnight_session_task"].cancel()
         try:
             await app["midnight_session_task"]
+        except asyncio.CancelledError:
+            pass
+
+    if "daily_report_task" in app:
+        app["daily_report_task"].cancel()
+        try:
+            await app["daily_report_task"]
         except asyncio.CancelledError:
             pass
 
