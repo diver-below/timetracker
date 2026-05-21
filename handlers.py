@@ -7,7 +7,7 @@ from config import logger
 from db import (
     UserState, get_or_create_user, get_current_state, update_state,
     create_session, end_session, end_break_session, end_task_session, save_task, get_user_tasks,
-    create_reminder, get_active_reminders, decrypt_value,
+    create_reminder, get_active_reminders, delete_all_user_reminders, decrypt_value,
     get_current_encrypted_task, update_user_name, get_task_name_by_id
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
@@ -274,6 +274,22 @@ async def handle_list_reminders(user_login: str, user_id: int):
     logger.info(f"User {user_login} listed reminders")
 
 
+async def handle_delete_reminders(user_login: str, user_id: int):
+    count = await delete_all_user_reminders(user_id)
+    current_state, _ = await get_current_state(user_id)
+    keyboard = fsm.get_keyboard_for_state(current_state)
+
+    if count == 0:
+        message = "У вас нет активных напоминаний для удаления."
+    elif count == 1:
+        message = "1 напоминание удалено."
+    else:
+        message = f"{count} напоминаний удалено."
+
+    await send_message(user_login, message, keyboard)
+    logger.info(f"User {user_login} deleted {count} reminders")
+
+
 async def handle_cancel(user_login: str, user_id: int, from_state: str):
     # Determine what state to return to based on what we were entering
     is_canceling_task = user_login in entering_task_users
@@ -410,6 +426,8 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_new_reminder_start(user_login, user.id)
         elif action == "/list_rem":
             await handle_list_reminders(user_login, user.id)
+        elif action == "/del_rem":
+            await handle_delete_reminders(user_login, user.id)
         else:
             await send_message(
                 user_login,

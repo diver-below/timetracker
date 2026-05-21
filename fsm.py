@@ -26,9 +26,9 @@ class FSM:
 
     def is_valid_transition(self, current_state: str, action: str) -> bool:
         transitions = {
-            UserState.IDLE.value: ["/start", "Начать работу", "/new_rem", "/list_rem"],
-            UserState.WORKING.value: ["/start", "Закончить", "Перерыв", "Сменить задачу", "/new_rem", "/list_rem"],
-            UserState.ON_BREAK.value: ["/start", "Вернуться", "/new_rem", "/list_rem"],
+            UserState.IDLE.value: ["/start", "Начать работу", "/new_rem", "/list_rem", "/del_rem"],
+            UserState.WORKING.value: ["/start", "Закончить", "Перерыв", "Сменить задачу", "/new_rem", "/list_rem", "/del_rem"],
+            UserState.ON_BREAK.value: ["/start", "Вернуться", "/new_rem", "/list_rem", "/del_rem"],
             UserState.ENTERING_TASK.value: ["/start", "Отмена"],
             UserState.ENTERING_REMINDER.value: ["/start", "Отмена"],
         }

@@ -393,6 +393,24 @@ async def mark_reminder_done(reminder_id: int):
             await session.commit()
 
 
+async def delete_all_user_reminders(user_id: int) -> int:
+    """Deactivate all active reminders for a user. Returns count of reminders deleted."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Reminder)
+            .where(Reminder.user_id == user_id)
+            .where(Reminder.is_done.is_(False))
+        )
+        reminders = result.scalars().all()
+
+        count = len(reminders)
+        for reminder in reminders:
+            reminder.is_done = True
+
+        await session.commit()
+        return count
+
+
 async def get_due_reminders() -> list[tuple[int, str, str]]:
     async with async_session_factory() as session:
         from sqlalchemy import and_
