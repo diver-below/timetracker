@@ -280,6 +280,62 @@ async def end_session(user_id: int) -> Optional[Session]:
         return sessions[0]
 
 
+async def end_break_session(user_id: int) -> bool:
+    """Close only the Break session, leaving the task session open."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .where(Session.end_time.is_(None))
+            .where(Session.task_name_encrypted == "Break")
+            .order_by(Session.start_time.desc())
+        )
+        break_session = result.scalar_one_or_none()
+
+        if not break_session:
+            return False
+
+        break_session.end_time = datetime.utcnow()
+        await session.commit()
+        return True
+
+
+async def end_task_session(user_id: int) -> bool:
+    """Close only task sessions (not Break), leaving break sessions open."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .where(Session.end_time.is_(None))
+            .where(Session.task_name_encrypted != "Break")
+        )
+        task_sessions = result.scalars().all()
+
+        if not task_sessions:
+            return False
+
+        now = datetime.utcnow()
+        for s in task_sessions:
+            s.end_time = now
+
+        await session.commit()
+        return True
+
+
+async def get_task_name_by_id(task_id: int) -> Optional[str]:
+    """Get task name from user_tasks table by task id."""
+    if not task_id:
+        return None
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(UserTask).where(UserTask.id == task_id)
+        )
+        task = result.scalar_one_or_none()
+        if task:
+            return decrypt_value(task.task_name_encrypted)
+        return None
+
+
 async def save_task(user_id: int, task_name: str) -> int:
     async with async_session_factory() as session:
         encrypted_task = encrypt_value(task_name)
