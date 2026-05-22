@@ -32,7 +32,11 @@ class FSM:
             UserState.ENTERING_TASK.value: ["/start", "Отмена", "/my_id"],
             UserState.ENTERING_REMINDER.value: ["/start", "Отмена", "/my_id"],
         }
-        return action in transitions.get(current_state, [])
+        valid_actions = transitions.get(current_state, [])
+        for valid in valid_actions:
+            if action == valid or action.startswith(valid + " "):
+                return True
+        return False
 
     def get_next_state(self, current_state: str, action: str, text: Optional[str] = None) -> Optional[str]:
         if action == "/start":
