@@ -9,11 +9,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from config import validate_config, WEBHOOK_URL, LISTEN_PORT, YANDEX_OAUTH_TOKEN, logger
 from db import (
     engine, init_db, get_due_reminders, mark_reminder_done, split_midnight_sessions, async_session_factory,
-    get_users_for_workday_reminders, has_work_sessions_today, has_open_session
+    get_users_for_workday_reminders, has_work_sessions_today, has_open_session, get_current_state
 )
 from handlers import process_message
 from bot_api import parse_webhook_payload, send_message
 from reports import send_daily_report_to_manager, get_managers_logins, send_weekly_report_to_manager
+from fsm import FSM
 
 
 async def webhook_handler(request: web.Request) -> web.Response:
@@ -178,15 +179,16 @@ async def weekly_report_checker():
 
 
 async def workday_reminder_checker():
-    """Check and send workday reminders every 10 minutes."""
+    """Check and send workday reminders every minute."""
     logger.info("Workday reminder checker started")
+    fsm = FSM()
 
     while True:
         try:
             users_for_reminders = await get_users_for_workday_reminders()
 
             if not users_for_reminders:
-                await asyncio.sleep(60)  # Check every minute, process when 10 min mark
+                await asyncio.sleep(60)
                 continue
 
             for user_data in users_for_reminders:
@@ -200,9 +202,11 @@ async def workday_reminder_checker():
                         has_worked = await has_work_sessions_today(user_id)
                         if not has_worked:
                             start_time = user_data["scheduled_work_start"]
+                            keyboard = fsm.get_keyboard_for_state("idle")
                             await send_message(
                                 user_login,
-                                f"⏰ Время начать работу! Ваше рабочее время: {start_time.strftime('%H:%M')}"
+                                f"⏰ Время начать работу! Ваше рабочее время: {start_time.strftime('%H:%M')}",
+                                keyboard
                             )
                             logger.info(f"Sent start work reminder to {user_login}")
 
@@ -211,9 +215,11 @@ async def workday_reminder_checker():
                         has_open = await has_open_session(user_id)
                         if has_open:
                             end_time = user_data["scheduled_work_end"]
+                            keyboard = fsm.get_keyboard_for_state("working")
                             await send_message(
                                 user_login,
-                                f"⏰ Рабочее время окончено! Не забудьте завершить задачу. Ваше время: до {end_time.strftime('%H:%M')}"
+                                f"⏰ Рабочее время окончено! Не забудьте завершить задачу. Ваше время: до {end_time.strftime('%H:%M')}",
+                                keyboard
                             )
                             logger.info(f"Sent end work reminder to {user_login}")
 
