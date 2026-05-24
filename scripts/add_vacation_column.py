@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Add vacation column to users table."""
+"""Add vacation column to current_status table."""
 
 import asyncio
 import sys
@@ -41,15 +41,15 @@ async def migrate():
             result = await conn.execute(text("""
                 SELECT column_name
                 FROM information_schema.columns
-                WHERE table_name = 'users'
+                WHERE table_name = 'current_status'
                 AND column_name = 'vacation'
             """))
             exists = result.scalar()
 
             if not exists:
-                logger.info("Adding vacation column to users table...")
+                logger.info("Adding vacation column to current_status table...")
                 await conn.execute(text("""
-                    ALTER TABLE users
+                    ALTER TABLE current_status
                     ADD COLUMN vacation BOOLEAN NOT NULL DEFAULT FALSE
                 """))
                 logger.info("Migration completed successfully!")
