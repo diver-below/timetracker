@@ -81,15 +81,32 @@ async def test_yandex_api_handler(request: web.Request) -> web.Response:
 
 async def reminder_checker():
     logger.info("Reminder checker started")
+    fsm = FSM()
+    import db as db_module
+
     while True:
         try:
             due_reminders = await get_due_reminders()
 
             for reminder_id, text, user_login in due_reminders:
                 if text.startswith("BREAK_TIMER:"):
-                    await send_message(user_login, "⏰ Перерыв длится уже 45 минут! Не забудьте вернуться к работе.")
+                    keyboard = fsm.get_keyboard_for_state(UserState.ON_BREAK.value)
+                    await send_message(user_login, "⏰ Перерыв длится уже 45 минут! Не забудьте вернуться к работе.", keyboard)
                 else:
-                    await send_message(user_login, f"⏰ Напоминание: {text}")
+                    # Get user_id for this reminder
+                    async with async_session_factory() as session:
+                        result = await session.execute(
+                            db_module.select(db_module.Reminder.user_id).where(db_module.Reminder.id == reminder_id)
+                        )
+                        user_id = result.scalar()
+
+                        if user_id:
+                            current_state, _ = await get_current_state(user_id)
+                            keyboard = fsm.get_keyboard_for_state(current_state) if current_state else None
+                            await send_message(user_login, f"⏰ Напоминание: {text}", keyboard)
+                        else:
+                            await send_message(user_login, f"⏰ Напоминание: {text}")
+
                 await mark_reminder_done(reminder_id)
                 logger.info(f"Sent reminder {reminder_id}: {text}")
 
