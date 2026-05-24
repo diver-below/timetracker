@@ -7,7 +7,10 @@ from aiohttp import web
 from sqlalchemy.ext.asyncio import async_sessionmaker
 
 from config import validate_config, WEBHOOK_URL, LISTEN_PORT, YANDEX_OAUTH_TOKEN, logger
-from db import engine, init_db, get_due_reminders, mark_reminder_done, split_midnight_sessions, async_session_factory
+from db import (
+    engine, init_db, get_due_reminders, mark_reminder_done, split_midnight_sessions, async_session_factory,
+    get_users_for_workday_reminders, has_work_sessions_today, has_open_session
+)
 from handlers import process_message
 from bot_api import parse_webhook_payload, send_message
 from reports import send_daily_report_to_manager, get_managers_logins, send_weekly_report_to_manager
@@ -174,6 +177,55 @@ async def weekly_report_checker():
         await asyncio.sleep(60)
 
 
+async def workday_reminder_checker():
+    """Check and send workday reminders every 10 minutes."""
+    logger.info("Workday reminder checker started")
+
+    while True:
+        try:
+            users_for_reminders = await get_users_for_workday_reminders()
+
+            if not users_for_reminders:
+                await asyncio.sleep(60)  # Check every minute, process when 10 min mark
+                continue
+
+            for user_data in users_for_reminders:
+                user_id = user_data["user_id"]
+                user_login = user_data["user_login"]
+                reminder_type = user_data["reminder_type"]
+
+                try:
+                    if reminder_type == "start":
+                        # Check if user has started work today
+                        has_worked = await has_work_sessions_today(user_id)
+                        if not has_worked:
+                            start_time = user_data["scheduled_work_start"]
+                            await send_message(
+                                user_login,
+                                f"⏰ Время начать работу! Ваше рабочее время: {start_time.strftime('%H:%M')}"
+                            )
+                            logger.info(f"Sent start work reminder to {user_login}")
+
+                    elif reminder_type == "end":
+                        # Check if user has open session
+                        has_open = await has_open_session(user_id)
+                        if has_open:
+                            end_time = user_data["scheduled_work_end"]
+                            await send_message(
+                                user_login,
+                                f"⏰ Рабочее время окончено! Не забудьте завершить задачу. Ваше время: до {end_time.strftime('%H:%M')}"
+                            )
+                            logger.info(f"Sent end work reminder to {user_login}")
+
+                except Exception as e:
+                    logger.error(f"Failed to send workday reminder to {user_login}: {e}", exc_info=True)
+
+        except Exception as e:
+            logger.error(f"Error in workday reminder checker: {e}", exc_info=True)
+
+        await asyncio.sleep(60)
+
+
 async def poll_pending_updates():
     """Get pending updates that were missed while bot was offline"""
     import aiohttp
@@ -258,6 +310,7 @@ async def on_startup(app: web.Application):
     app["midnight_session_task"] = asyncio.create_task(midnight_session_checker())
     app["daily_report_task"] = asyncio.create_task(daily_report_checker())
     app["weekly_report_task"] = asyncio.create_task(weekly_report_checker())
+    app["workday_reminder_task"] = asyncio.create_task(workday_reminder_checker())
 
 
 async def on_shutdown(app: web.Application):
@@ -286,6 +339,13 @@ async def on_shutdown(app: web.Application):
         app["weekly_report_task"].cancel()
         try:
             await app["weekly_report_task"]
+        except asyncio.CancelledError:
+            pass
+
+    if "workday_reminder_task" in app:
+        app["workday_reminder_task"].cancel()
+        try:
+            await app["workday_reminder_task"]
         except asyncio.CancelledError:
             pass
 

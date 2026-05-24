@@ -888,3 +888,84 @@ async def get_user_state_info(user_id: int) -> Optional[dict]:
             "last_session_start": last_session.start_time if last_session else None,
             "last_session_end": last_session.end_time if last_session else None,
         }
+
+
+async def get_users_for_workday_reminders() -> list[dict]:
+    """Get users whose scheduled work time is within the last 10 minutes (GMT+3).
+    Returns: {user_id, user_login, scheduled_work_start, scheduled_work_end, reminder_type}
+    reminder_type: 'start' if work start time match, 'end' if work end time match"""
+    now = datetime.utcnow()
+    gmt3_now = now + timedelta(hours=3)
+    current_time_gmt3 = time(hour=gmt3_now.hour, minute=gmt3_now.minute)
+
+    users = []
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(User.id, User.yandex_user_login, User.scheduled_work_start, User.scheduled_work_end)
+            .where(User.scheduled_work_start.isnot(None))
+            .where(User.scheduled_work_end.isnot(None))
+        )
+
+        for row in result.all():
+            # Check if start time is within the last 10 minutes
+            if row.scheduled_work_start:
+                minutes_since_start = (
+                    current_time_gmt3.hour * 60 + current_time_gmt3.minute
+                ) - (row.scheduled_work_start.hour * 60 + row.scheduled_work_start.minute)
+
+                if 0 <= minutes_since_start <= 10:
+                    users.append({
+                        "user_id": row.id,
+                        "user_login": row.yandex_user_login,
+                        "scheduled_work_start": row.scheduled_work_start,
+                        "scheduled_work_end": row.scheduled_work_end,
+                        "reminder_type": "start"
+                    })
+                    continue
+
+            # Check if end time is within the last 10 minutes
+            if row.scheduled_work_end:
+                minutes_since_end = (
+                    current_time_gmt3.hour * 60 + current_time_gmt3.minute
+                ) - (row.scheduled_work_end.hour * 60 + row.scheduled_work_end.minute)
+
+                if 0 <= minutes_since_end <= 10:
+                    users.append({
+                        "user_id": row.id,
+                        "user_login": row.yandex_user_login,
+                        "scheduled_work_start": row.scheduled_work_start,
+                        "scheduled_work_end": row.scheduled_work_end,
+                        "reminder_type": "end"
+                    })
+
+        return users
+
+
+async def has_work_sessions_today(user_id: int) -> bool:
+    """Check if user has any work (non-break) sessions today."""
+    now = datetime.utcnow()
+    user_date = (now + timedelta(hours=3)).date()
+    midnight_start = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0) - timedelta(days=1)
+    midnight_end = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0)
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(func.count(Session.id))
+            .where(Session.user_id == user_id)
+            .where(Session.start_time >= midnight_start)
+            .where(Session.start_time < midnight_end)
+            .where(Session.task_name_encrypted != "Break")
+        )
+        return result.scalar() > 0
+
+
+async def has_open_session(user_id: int) -> bool:
+    """Check if user has any open (unclosed) session."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(func.count(Session.id))
+            .where(Session.user_id == user_id)
+            .where(Session.end_time.is_(None))
+        )
+        return result.scalar() > 0
