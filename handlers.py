@@ -33,6 +33,8 @@ entering_task_users = set()
 switching_task_context = {}  # {user_login: (old_task_id, old_task_name)}
 entering_work_start_users = set()
 entering_work_end_users = {}
+setting_work_time_users = set()  # users using /setworktime command
+setting_work_time_context = {}  # {user_login: start_time}
 
 
 def parse_work_time(text: str) -> Optional[time]:
@@ -145,6 +147,8 @@ async def handle_start(user_login: str, user_id: int):
     # Clean up work time tracking
     entering_work_start_users.discard(user_login)
     entering_work_end_users.pop(user_login, None)
+    setting_work_time_users.discard(user_login)
+    setting_work_time_context.pop(user_login, None)
 
     await update_state(user_id, UserState.IDLE.value)
     await send_message(user_login, "Привет! Я бот для учёта рабочего времени.\n\nНажмите «Начать работу», чтобы приступить.", IDLE_KEYBOARD)
@@ -426,6 +430,16 @@ async def handle_give_role(user_login: str, user_id: int, args: str):
         logger.info(f"Admin {user_login} failed to add role '{role}' to user {target_user_id} - already has role")
 
 
+async def handle_set_work_time_command(user_login: str, user_id: int):
+    setting_work_time_users.add(user_login)
+    await send_message(
+        user_login,
+        "Укажите время начала работы (формат ЧЧ:ММ, например: 8:00 или 14:30):",
+        CANCEL_KEYBOARD
+    )
+    logger.info(f"User {user_login} started setting work time")
+
+
 async def handle_state(user_login: str, user_id: int, args: str):
     """Admin only: /state <user_id>"""
     # Check if user has admin role
@@ -657,6 +671,56 @@ async def process_message(user_login: str, chat_id: str, text: str):
                 await send_message(user_login, "Неверный формат. Используйте ЧЧ:ММ, например: 18:00 или 18:30", CANCEL_KEYBOARD)
             return
 
+        # Handle /setworktime command flow
+        if user_login in setting_work_time_users:
+            if text == "Отмена":
+                setting_work_time_users.discard(user_login)
+                current_state, _ = await get_current_state(user.id)
+                keyboard = fsm.get_keyboard_for_state(current_state)
+                await send_message(user_login, "Изменение времени отменено.", keyboard)
+                return
+
+            work_time = parse_work_time(text)
+            if work_time:
+                setting_work_time_users.discard(user_login)
+                setting_work_time_context[user_login] = work_time
+                await send_message(
+                    user_login,
+                    f"Время начала: {work_time.strftime('%H:%M')}\n\n"
+                    "Укажите время окончания работы (формат ЧЧ:ММ):",
+                    CANCEL_KEYBOARD
+                )
+                logger.info(f"User {user_login} set work start: {work_time}")
+            else:
+                await send_message(user_login, "Неверный формат. Используйте ЧЧ:ММ, например: 9:00", CANCEL_KEYBOARD)
+            return
+
+        if user_login in setting_work_time_context:
+            if text == "Отмена":
+                setting_work_time_context.pop(user_login, None)
+                current_state, _ = await get_current_state(user.id)
+                keyboard = fsm.get_keyboard_for_state(current_state)
+                await send_message(user_login, "Изменение времени отменено.", keyboard)
+                return
+
+            work_time = parse_work_time(text)
+            if work_time:
+                start_time = setting_work_time_context.pop(user_login)
+                await update_user_work_times(user.id, start_time, work_time)
+
+                current_state, _ = await get_current_state(user.id)
+                keyboard = fsm.get_keyboard_for_state(current_state)
+
+                await send_message(
+                    user_login,
+                    f"Время работы изменено: {start_time.strftime('%H:%M')} - {work_time.strftime('%H:%M')}",
+                    keyboard
+                )
+                logger.info(f"User {user_login} updated work times: {start_time} - {work_time}")
+            else:
+                await send_message(user_login, "Неверный формат. Используйте ЧЧ:ММ, например: 17:00", CANCEL_KEYBOARD)
+            return
+
         current_state, _ = await get_current_state(user.id)
 
         if text == "/start":
@@ -713,6 +777,8 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_give_role(user_login, user.id, action.replace("/give_role", ""))
         elif action.startswith("/state"):
             await handle_state(user_login, user.id, action.replace("/state", ""))
+        elif action == "/setworktime":
+            await handle_set_work_time_command(user_login, user.id)
         else:
             await send_message(
                 user_login,
