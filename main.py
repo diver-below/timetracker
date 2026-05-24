@@ -15,6 +15,8 @@ from handlers import process_message
 from bot_api import parse_webhook_payload, send_message
 from reports import send_daily_report_to_manager, get_managers_logins, send_weekly_report_to_manager
 from fsm import FSM
+import json
+import os
 
 
 async def webhook_handler(request: web.Request) -> web.Response:
@@ -185,6 +187,11 @@ async def workday_reminder_checker():
 
     while True:
         try:
+            # Skip if today is a holiday
+            if is_today_holiday():
+                await asyncio.sleep(60)
+                continue
+
             users_for_reminders = await get_users_for_workday_reminders()
 
             if not users_for_reminders:
@@ -230,6 +237,33 @@ async def workday_reminder_checker():
             logger.error(f"Error in workday reminder checker: {e}", exc_info=True)
 
         await asyncio.sleep(60)
+
+
+def is_today_holiday() -> bool:
+    """Check if today is a holiday based on holiday JSON file."""
+    try:
+        now = datetime.utcnow()
+        gmt3_now = now + timedelta(hours=3)
+        year = gmt3_now.year
+        month = gmt3_now.month
+        day = gmt3_now.day
+
+        holidays_file = os.path.join(os.path.dirname(__file__), f"{year}.json")
+        if not os.path.exists(holidays_file):
+            logger.info(f"Holidays file {year}.json not found, treating as work day")
+            return False
+
+        with open(holidays_file, "r") as f:
+            holidays = json.load(f)
+
+        month_str = str(month)
+        if month_str in holidays:
+            return day in holidays[month_str]
+
+        return False
+    except Exception as e:
+        logger.error(f"Error checking holidays: {e}")
+        return False
 
 
 async def poll_pending_updates():
