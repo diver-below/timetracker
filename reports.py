@@ -30,8 +30,9 @@ def generate_daily_report(users_data: list[dict]) -> str:
     """Generate combined daily report for all users."""
     now = datetime.utcnow()
     local_date = (now + timedelta(hours=3)).strftime("%d.%m.%Y")
+    local_time = (now + timedelta(hours=3)).strftime("%H:%M")
 
-    lines = [f"📊 Ежедневный отчёт за {local_date}:", ""]
+    lines = [f"📊 Ежедневный отчёт за {local_date} ({local_time}):", ""]
 
     if not users_data:
         lines.append("За сегодня данные отсутствуют.")
@@ -41,8 +42,18 @@ def generate_daily_report(users_data: list[dict]) -> str:
         user_name = user_data["user_name"]
         task_durations = user_data["task_durations"]
         break_seconds = user_data["break_seconds"]
+        is_working = user_data.get("is_working", False)
+        current_task = user_data.get("current_task")
 
-        lines.append(f"👤 {user_name}:")
+        # Status indicator
+        status = "● работает" if is_working else ""
+        if status:
+            user_line = f"👤 {user_name} {status}"
+            if current_task and current_task != "Break":
+                user_line += f" (на: {current_task})"
+            lines.append(user_line)
+        else:
+            lines.append(f"👤 {user_name}:")
 
         if task_durations:
             for task, duration in sorted(task_durations.items()):

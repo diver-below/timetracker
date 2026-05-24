@@ -614,7 +614,7 @@ async def update_user_name(user_id: int, name: str):
 
 async def get_all_users_today_sessions() -> list[dict]:
     """Get today's (in GMT+3) work sessions for all users.
-    Returns list of dicts: {user_id, user_name, task_durations, break_seconds}"""
+    Returns list of dicts: {user_id, user_name, task_durations, break_seconds, is_working, current_task}"""
     now = datetime.utcnow()
     # Today in GMT+3
     user_date = (now + timedelta(hours=3)).date()
@@ -623,7 +623,7 @@ async def get_all_users_today_sessions() -> list[dict]:
     midnight_end = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0)
 
     async with async_session_factory() as session:
-        # Get all sessions for today with user info
+        # Get all sessions for today with user info (including open sessions)
         from sqlalchemy import and_
 
         result = await session.execute(
@@ -631,7 +631,6 @@ async def get_all_users_today_sessions() -> list[dict]:
             .join(User, Session.user_id == User.id)
             .where(Session.start_time >= midnight_start)
             .where(Session.start_time < midnight_end)
-            .where(Session.end_time.isnot(None))
             .order_by(User.id, Session.start_time)
         )
         session_data = result.all()
@@ -644,16 +643,32 @@ async def get_all_users_today_sessions() -> list[dict]:
                     "user_id": user.id,
                     "user_name": user.name or f"User {user.id}",
                     "task_durations": {},
-                    "break_seconds": 0
+                    "break_seconds": 0,
+                    "is_working": False,
+                    "current_task": None
                 }
 
-            duration = int((session.end_time - session.start_time).total_seconds())
+            # Calculate duration - use now for open sessions
+            end_time = session.end_time if session.end_time else now
+            duration = int((end_time - session.start_time).total_seconds())
+
             if session.task_name_encrypted == "Break":
-                user_data[user.id]["break_seconds"] += duration
+                # Only count break if it's closed, or if it's the current break
+                if session.end_time is not None:
+                    user_data[user.id]["break_seconds"] += duration
+                elif not user_data[user.id]["is_working"]:
+                    # User is currently on break
+                    user_data[user.id]["is_working"] = True
+                    user_data[user.id]["current_task"] = "Break"
             else:
                 task_name = decrypt_value(session.task_name_encrypted)
                 user_data[user.id]["task_durations"][task_name] = (
                     user_data[user.id]["task_durations"].get(task_name, 0) + duration
                 )
+
+                # If session is open, user is working on this task
+                if session.end_time is None:
+                    user_data[user.id]["is_working"] = True
+                    user_data[user.id]["current_task"] = task_name
 
         return list(user_data.values())
