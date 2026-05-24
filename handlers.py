@@ -10,7 +10,7 @@ from db import (
     create_reminder, get_active_reminders, delete_all_user_reminders, delete_break_reminders, decrypt_value,
     get_current_encrypted_task, update_user_name, get_task_name_by_id,
     get_user_roles, has_role, add_role, get_user_by_yandex_login, get_user_by_id,
-    get_today_sessions, get_user_state_info, update_user_work_times
+    get_today_sessions, get_user_state_info, update_user_work_times, toggle_vacation
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
@@ -440,6 +440,19 @@ async def handle_set_work_time_command(user_login: str, user_id: int):
     logger.info(f"User {user_login} started setting work time")
 
 
+async def handle_vacation(user_login: str, user_id: int):
+    is_on_vacation = await toggle_vacation(user_id)
+    current_state, _ = await get_current_state(user_id)
+    keyboard = fsm.get_keyboard_for_state(current_state)
+
+    if is_on_vacation:
+        await send_message(user_login, "🏖️ Отпуск включён. Хорошего отдыха!", keyboard)
+        logger.info(f"User {user_login} enabled vacation")
+    else:
+        await send_message(user_login, "🏖️ Отпуск отключён. Добро пожаловать обратно!", keyboard)
+        logger.info(f"User {user_login} disabled vacation")
+
+
 async def handle_state(user_login: str, user_id: int, args: str):
     """Admin only: /state <user_id>"""
     # Check if user has admin role
@@ -779,6 +792,8 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_state(user_login, user.id, action.replace("/state", ""))
         elif action == "/setworktime":
             await handle_set_work_time_command(user_login, user.id)
+        elif action == "/vacation":
+            await handle_vacation(user_login, user.id)
         else:
             await send_message(
                 user_login,

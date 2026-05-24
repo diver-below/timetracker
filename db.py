@@ -245,6 +245,21 @@ async def update_state(user_id: int, state: str, task_id: Optional[int] = None):
         await session.commit()
 
 
+async def toggle_vacation(user_id: int) -> bool:
+    """Toggle vacation status. Returns new vacation status (True/False)."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(CurrentStatus).where(CurrentStatus.user_id == user_id)
+        )
+        status = result.scalar_one_or_none()
+
+        if status:
+            status.vacation = not status.vacation
+            await session.commit()
+            return status.vacation
+        return False
+
+
 async def create_session(user_id: int, task_name: str) -> int:
     async with async_session_factory() as session:
         encrypted_task = encrypt_value(task_name)
