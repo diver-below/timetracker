@@ -30,6 +30,7 @@ fsm = FSM()
 # In-memory tracking for users entering reminders/tasks
 entering_reminder_users = set()
 entering_task_users = set()
+switching_task_context = {}  # {user_login: (old_task_id, old_task_name)}
 
 
 def parse_reminder_time(text: str) -> Optional[datetime]:
@@ -115,6 +116,13 @@ def format_duration(seconds: int) -> str:
 async def handle_start(user_login: str, user_id: int):
     entering_reminder_users.discard(user_login)
     entering_task_users.discard(user_login)
+
+    # Clean up switching context if user was switching tasks
+    if user_login in switching_task_context:
+        switching_task_context.pop(user_login, None)
+        # Close the session that was left open during task switch
+        await end_session(user_id)
+
     await update_state(user_id, UserState.IDLE.value)
     await send_message(user_login, "Привет! Я бот для учёта рабочего времени.\n\nНажмите «Начать работу», чтобы приступить.", IDLE_KEYBOARD)
     logger.info(f"User {user_login} sent /start, reset to IDLE")
@@ -132,6 +140,12 @@ async def handle_task_entry(user_login: str, user_id: int, task_name: str):
         return
 
     entering_task_users.discard(user_login)
+
+    # If user was switching tasks, close old session first
+    if user_login in switching_task_context:
+        old_task_id, old_task_name = switching_task_context.pop(user_login)
+        await end_session(user_id)
+
     await create_session(user_id, task_name)
     task_id = await save_task(user_id, task_name)
     await update_state(user_id, UserState.WORKING.value, task_id=task_id)
@@ -237,16 +251,19 @@ async def handle_return_from_break(user_login: str, user_id: int):
 
 
 async def handle_switch_task(user_login: str, user_id: int):
+    _, current_task_id = await get_current_state(user_id)
     current_encrypted = await get_current_encrypted_task(user_id)
     old_task = decrypt_value(current_encrypted) if current_encrypted else None
 
-    await end_session(user_id)
+    # Store old task context for potential cancel
+    switching_task_context[user_login] = (current_task_id, old_task)
+
     entering_task_users.add(user_login)
 
     if old_task:
         await send_message(
             user_login,
-            f"Задача «{old_task}» завершена.\n\nВведите название новой задачи:",
+            f"Введите название новой задачи (текущая «{old_task}»):",
             CANCEL_KEYBOARD
         )
     else:
@@ -391,6 +408,9 @@ async def handle_cancel(user_login: str, user_id: int, from_state: str):
     is_canceling_task = user_login in entering_task_users
     is_canceling_reminder = user_login in entering_reminder_users
 
+    # Check if user was switching tasks
+    was_switching_task = user_login in switching_task_context
+
     if is_canceling_task:
         entering_task_users.discard(user_login)
 
@@ -424,10 +444,23 @@ async def handle_cancel(user_login: str, user_id: int, from_state: str):
     # Build message
     message = "Действие отменено. Текущий статус: " + state_names.get(return_state, return_state)
 
+    # Restore old task session if user was switching tasks
+    if was_switching_task and return_state == UserState.WORKING.value:
+        old_task_id, old_task_name = switching_task_context.pop(user_login, (None, None))
+        if old_task_name:
+            # Close any dangling sessions first
+            await end_session(user_id)
+            # Restore the old task session
+            await create_session(user_id, old_task_name)
+            message += f"\nПродолжаем задачу «{old_task_name}»."
+            logger.info(f"User {user_login} cancelled task switch, restored task: {old_task_name}")
+    elif user_login in switching_task_context:
+        switching_task_context.pop(user_login, None)
+
     # If working, show current task
     if return_state == UserState.WORKING.value:
         task_name = await get_task_name_by_id(current_task_id) if current_task_id else None
-        if task_name:
+        if task_name and not was_switching_task:
             message += f"\nТекущая задача: {task_name}"
 
     # Get appropriate keyboard
