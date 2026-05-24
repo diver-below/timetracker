@@ -10,7 +10,7 @@ from db import (
     create_reminder, get_active_reminders, delete_all_user_reminders, delete_break_reminders, decrypt_value,
     get_current_encrypted_task, update_user_name, get_task_name_by_id,
     get_user_roles, has_role, add_role, get_user_by_yandex_login, get_user_by_id,
-    get_today_sessions
+    get_today_sessions, get_user_state_info
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
@@ -403,6 +403,86 @@ async def handle_give_role(user_login: str, user_id: int, args: str):
         logger.info(f"Admin {user_login} failed to add role '{role}' to user {target_user_id} - already has role")
 
 
+async def handle_state(user_login: str, user_id: int, args: str):
+    """Admin only: /state <user_id>"""
+    # Check if user has admin role
+    is_admin = await has_role(user_id, "admin")
+    if not is_admin:
+        await send_message(user_login, "У вас нет прав для этой команды.")
+        logger.warning(f"Non-admin user {user_login} tried to use /state")
+        return
+
+    # Parse user_id
+    parts = args.strip().split()
+    if len(parts) != 1:
+        await send_message(user_login, "Формат: /state <user_id>")
+        return
+
+    # Validate user_id is a number
+    try:
+        target_user_id = int(parts[0])
+    except ValueError:
+        await send_message(user_login, "Неверный формат user_id. Должно быть число.")
+        return
+
+    # Validate target user exists
+    target_user = await get_user_by_id(target_user_id)
+    if not target_user:
+        await send_message(user_login, f"Пользователь с ID {target_user_id} не найден.")
+        logger.info(f"Admin {user_login} tried to get state for non-existent user {target_user_id}")
+        return
+
+    # Get state info
+    state_info = await get_user_state_info(target_user_id)
+
+    # Build response
+    lines = [
+        f"📊 Состояние пользователя {target_user.name} (ID: {target_user_id}):",
+        ""
+    ]
+
+    # Current status
+    state_names = {
+        UserState.IDLE.value: "не работает",
+        UserState.WORKING.value: "работает",
+        UserState.ON_BREAK.value: "на перерыве",
+    }
+    current_state = state_info["current_state"]
+    lines.append(f"Текущее состояние: {state_names.get(current_state, current_state)}")
+
+    # Current task
+    if state_info["current_task_id"]:
+        lines.append(f"Текущая задача ID: {state_info['current_task_id']}")
+
+    # Last task
+    if state_info["last_task_name"]:
+        lines.append(f"Последняя задача: {state_info['last_task_name']} (ID: {state_info['last_task_id']})")
+
+    lines.append("")
+
+    # Last session
+    if state_info["last_session_id"]:
+        lines.append(f"Последняя сессия (ID: {state_info['last_session_id']}):")
+        lines.append(f"  - Задача: {state_info['last_session_task']}")
+
+        # Format times
+        from datetime import timedelta
+        start_time = state_info["last_session_start"]
+        if start_time:
+            local_start = start_time + timedelta(hours=3)
+            lines.append(f"  - Начало: {local_start.strftime('%d.%m.%Y %H:%M')}")
+
+        end_time = state_info["last_session_end"]
+        if end_time:
+            local_end = end_time + timedelta(hours=3)
+            lines.append(f"  - Конец: {local_end.strftime('%d.%m.%Y %H:%M')}")
+        else:
+            lines.append(f"  - Конец: (не завершена)")
+
+    await send_message(user_login, "\n".join(lines))
+    logger.info(f"Admin {user_login} requested state for user {target_user_id}")
+
+
 async def handle_cancel(user_login: str, user_id: int, from_state: str):
     # Determine what state to return to based on what we were entering
     is_canceling_task = user_login in entering_task_users
@@ -565,6 +645,8 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_my_id(user_login, user.id)
         elif action.startswith("/give_role"):
             await handle_give_role(user_login, user.id, action.replace("/give_role", ""))
+        elif action.startswith("/state"):
+            await handle_state(user_login, user.id, action.replace("/state", ""))
         else:
             await send_message(
                 user_login,

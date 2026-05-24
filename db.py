@@ -837,3 +837,42 @@ async def get_user_weekly_sessions(user_id: int) -> tuple[int, int]:
                 work_seconds += duration
 
         return work_seconds, break_seconds
+
+
+async def get_user_state_info(user_id: int) -> Optional[dict]:
+    """Get user state info for admin: CurrentStatus, last user_task, last session.
+    Returns: {current_state, current_task_id, last_task, last_session}"""
+    async with async_session_factory() as session:
+        # Get current status
+        status_result = await session.execute(
+            select(CurrentStatus).where(CurrentStatus.user_id == user_id)
+        )
+        current_status = status_result.scalar_one_or_none()
+
+        # Get last user task
+        task_result = await session.execute(
+            select(UserTask)
+            .where(UserTask.user_id == user_id)
+            .order_by(UserTask.id.desc())
+        )
+        last_task = task_result.scalar_one_or_none()
+        last_task_name = decrypt_value(last_task.task_name_encrypted) if last_task else None
+
+        # Get last session (even if not closed)
+        session_result = await session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .order_by(Session.start_time.desc())
+        )
+        last_session = session_result.scalar_one_or_none()
+
+        return {
+            "current_state": current_status.current_state if current_status else None,
+            "current_task_id": current_status.current_task_id if current_status else None,
+            "last_task_id": last_task.id if last_task else None,
+            "last_task_name": last_task_name,
+            "last_session_id": last_session.id if last_session else None,
+            "last_session_task": decrypt_value(last_session.task_name_encrypted) if last_session and last_session.task_name_encrypted != "Break" else "Break" if last_session else None,
+            "last_session_start": last_session.start_time if last_session else None,
+            "last_session_end": last_session.end_time if last_session else None,
+        }
