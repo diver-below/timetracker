@@ -446,10 +446,10 @@ async def handle_vacation(user_login: str, user_id: int):
     keyboard = fsm.get_keyboard_for_state(current_state)
 
     if is_on_vacation:
-        await send_message(user_login, "🏖️ Отпуск включён. Хорошего отдыха!", keyboard)
+        await send_message(user_login, "🏖️ Отпуск включён. Уведомления о расписании отключены. Хорошего отдыха!", keyboard)
         logger.info(f"User {user_login} enabled vacation")
     else:
-        await send_message(user_login, "🏖️ Отпуск отключён. Добро пожаловать обратно!", keyboard)
+        await send_message(user_login, "🏖️ Отпуск отключён. Уведомления о расписании включены! Добро пожаловать обратно!", keyboard)
         logger.info(f"User {user_login} disabled vacation")
 
 
