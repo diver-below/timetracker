@@ -9,7 +9,8 @@ from sqlalchemy.ext.asyncio import async_sessionmaker
 from config import validate_config, WEBHOOK_URL, LISTEN_PORT, YANDEX_OAUTH_TOKEN, logger
 from db import (
     engine, init_db, get_due_reminders, mark_reminder_done, split_midnight_sessions, async_session_factory,
-    get_users_for_workday_reminders, has_work_sessions_today, has_open_session, get_current_state
+    get_users_for_workday_reminders, has_work_sessions_today, has_open_session, get_current_state,
+    is_user_on_vacation
 )
 from handlers import process_message
 from bot_api import parse_webhook_payload, send_message
@@ -204,6 +205,11 @@ async def workday_reminder_checker():
                 reminder_type = user_data["reminder_type"]
 
                 try:
+                    # Skip if user is on vacation
+                    if await is_user_on_vacation(user_id):
+                        logger.debug(f"User {user_login} is on vacation, skipping reminder")
+                        continue
+
                     if reminder_type == "start":
                         # Check if user has started work today
                         has_worked = await has_work_sessions_today(user_id)

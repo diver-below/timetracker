@@ -260,6 +260,16 @@ async def toggle_vacation(user_id: int) -> bool:
         return False
 
 
+async def is_user_on_vacation(user_id: int) -> bool:
+    """Check if user is on vacation."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(CurrentStatus.vacation).where(CurrentStatus.user_id == user_id)
+        )
+        vacation_status = result.scalar()
+        return vacation_status if vacation_status else False
+
+
 async def create_session(user_id: int, task_name: str) -> int:
     async with async_session_factory() as session:
         encrypted_task = encrypt_value(task_name)
