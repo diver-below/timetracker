@@ -62,6 +62,7 @@ class User(Base):
     scheduled_work_start: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     scheduled_work_end: Mapped[Optional[time]] = mapped_column(Time, nullable=True)
     roles: Mapped[str] = mapped_column(String(255), nullable=False, default="employee")
+    vacation: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
     current_status: Mapped["CurrentStatus"] = relationship(
         "CurrentStatus", back_populates="user", cascade="all, delete-orphan", uselist=False
