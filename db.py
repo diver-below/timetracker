@@ -631,6 +631,18 @@ async def update_user_name(user_id: int, name: str):
             await session.commit()
 
 
+async def update_user_work_times(user_id: int, start_time: time, end_time: time):
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(User).where(User.id == user_id)
+        )
+        user = result.scalar_one_or_none()
+        if user:
+            user.scheduled_work_start = start_time
+            user.scheduled_work_end = end_time
+            await session.commit()
+
+
 async def get_all_users_today_sessions() -> list[dict]:
     """Get today's (in GMT+3) work sessions for all users.
     Returns list of dicts: {user_id, user_name, task_durations, break_seconds, is_working, current_task, roles}"""

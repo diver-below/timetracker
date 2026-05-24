@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from typing import Optional
 import traceback
 import re
@@ -10,7 +10,7 @@ from db import (
     create_reminder, get_active_reminders, delete_all_user_reminders, delete_break_reminders, decrypt_value,
     get_current_encrypted_task, update_user_name, get_task_name_by_id,
     get_user_roles, has_role, add_role, get_user_by_yandex_login, get_user_by_id,
-    get_today_sessions, get_user_state_info
+    get_today_sessions, get_user_state_info, update_user_work_times
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
 from bot_api import send_message
@@ -31,6 +31,25 @@ fsm = FSM()
 entering_reminder_users = set()
 entering_task_users = set()
 switching_task_context = {}  # {user_login: (old_task_id, old_task_name)}
+entering_work_start_users = set()
+entering_work_end_users = {}
+
+
+def parse_work_time(text: str) -> Optional[time]:
+    """Parse work time in format HH:MM (e.g., '9:00', '14:30')"""
+    text = text.strip().replace(".", ":")
+
+    try:
+        parts = text.split(":")
+        hours = int(parts[0])
+        minutes = int(parts[1]) if len(parts) > 1 else 0
+
+        if 0 <= hours <= 23 and 0 <= minutes <= 59:
+            return time(hour=hours, minute=minutes)
+    except (ValueError, IndexError):
+        pass
+
+    return None
 
 
 def parse_reminder_time(text: str) -> Optional[datetime]:
@@ -122,6 +141,10 @@ async def handle_start(user_login: str, user_id: int):
         switching_task_context.pop(user_login, None)
         # Close the session that was left open during task switch
         await end_session(user_id)
+
+    # Clean up work time tracking
+    entering_work_start_users.discard(user_login)
+    entering_work_end_users.pop(user_login, None)
 
     await update_state(user_id, UserState.IDLE.value)
     await send_message(user_login, "Привет! Я бот для учёта рабочего времени.\n\nНажмите «Начать работу», чтобы приступить.", IDLE_KEYBOARD)
@@ -580,15 +603,58 @@ async def process_message(user_login: str, chat_id: str, text: str):
         if not user.name:
             if text.strip():
                 await update_user_name(user.id, text.strip())
+                entering_work_start_users.add(user_login)
                 await send_message(
                     user_login,
                     f"Рад знакомству, {text.strip()}!\n\n"
-                    "Нажмите «Начать работу», когда будете готовы приступить к задачам.",
-                    IDLE_KEYBOARD
+                    "Укажите ваше обычное время начала работы (формат ЧЧ:ММ, например: 9:00 или 14:30):",
+                    CANCEL_KEYBOARD
                 )
                 logger.info(f"User {user_login} set name: {text.strip()}")
             else:
                 await send_message(user_login, "Пожалуйста, введите ваше имя.", NO_KEYBOARD)
+            return
+
+        if user_login in entering_work_start_users:
+            if text == "Отмена":
+                entering_work_start_users.discard(user_login)
+                await send_message(user_login, "Время работы не указано. Используйте /my_id чтобы узнать свой ID, затем свяжитесь с администратором.", NO_KEYBOARD)
+                return
+
+            work_time = parse_work_time(text)
+            if work_time:
+                entering_work_end_users[user_login] = work_time
+                entering_work_start_users.discard(user_login)
+                await send_message(
+                    user_login,
+                    f"Время начала работы: {work_time.strftime('%H:%M')}\n\n"
+                    "Укажите ваше обычное время окончания работы (формат ЧЧ:ММ):",
+                    CANCEL_KEYBOARD
+                )
+                logger.info(f"User {user_login} set work start: {work_time}")
+            else:
+                await send_message(user_login, "Неверный формат. Используйте ЧЧ:ММ, например: 9:00 или 14:30", CANCEL_KEYBOARD)
+            return
+
+        if user_login in entering_work_end_users:
+            if text == "Отмена":
+                entering_work_end_users.pop(user_login, None)
+                await send_message(user_login, "Настройка отменена. Свяжитесь с администратором для указания времени.", NO_KEYBOARD)
+                return
+
+            work_time = parse_work_time(text)
+            if work_time:
+                start_time = entering_work_end_users.pop(user_login)
+                await update_user_work_times(user.id, start_time, work_time)
+                await send_message(
+                    user_login,
+                    f"Время работы: {start_time.strftime('%H:%M')} - {work_time.strftime('%H:%M')}\n\n"
+                    "Нажмите «Начать работу», когда будете готовы приступить к задачам.",
+                    IDLE_KEYBOARD
+                )
+                logger.info(f"User {user_login} set work times: {start_time} - {work_time}")
+            else:
+                await send_message(user_login, "Неверный формат. Используйте ЧЧ:ММ, например: 18:00 или 18:30", CANCEL_KEYBOARD)
             return
 
         current_state, _ = await get_current_state(user.id)
