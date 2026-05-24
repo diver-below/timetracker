@@ -79,7 +79,10 @@ async def reminder_checker():
             due_reminders = await get_due_reminders()
 
             for reminder_id, text, user_login in due_reminders:
-                await send_message(user_login, f"⏰ Напоминание: {text}")
+                if text.startswith("BREAK_TIMER:"):
+                    await send_message(user_login, "⏰ Перерыв длится уже 45 минут! Не забудьте вернуться к работе.")
+                else:
+                    await send_message(user_login, f"⏰ Напоминание: {text}")
                 await mark_reminder_done(reminder_id)
                 logger.info(f"Sent reminder {reminder_id}: {text}")
 

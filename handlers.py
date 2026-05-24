@@ -7,7 +7,7 @@ from config import logger
 from db import (
     UserState, get_or_create_user, get_current_state, update_state,
     create_session, end_session, end_break_session, end_task_session, save_task, get_user_tasks,
-    create_reminder, get_active_reminders, delete_all_user_reminders, decrypt_value,
+    create_reminder, get_active_reminders, delete_all_user_reminders, delete_break_reminders, decrypt_value,
     get_current_encrypted_task, update_user_name, get_task_name_by_id,
     get_user_roles, has_role, add_role, get_user_by_yandex_login, get_user_by_id,
     get_today_sessions
@@ -188,15 +188,22 @@ async def handle_break(user_login: str, user_id: int):
     # Preserve task_id in CurrentStatus
     await update_state(user_id, UserState.ON_BREAK.value, task_id=current_task_id)
 
+    # Create 45-minute break timer reminder
+    break_time = datetime.utcnow() + timedelta(minutes=45)
+    await create_reminder(user_id, "BREAK_TIMER:break_over", break_time)
+
     await send_message(
         user_login,
         "Перерыв начат. Нажмите «Вернуться», когда будете готовы продолжить работу.",
         ON_BREAK_KEYBOARD
     )
-    logger.info(f"User {user_login} went on break")
+    logger.info(f"User {user_login} went on break, timer set for {break_time}")
 
 
 async def handle_return_from_break(user_login: str, user_id: int):
+    # Cancel break timer
+    await delete_break_reminders(user_id)
+
     # Get current task id from CurrentStatus
     _, current_task_id = await get_current_state(user_id)
 

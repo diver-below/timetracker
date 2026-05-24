@@ -412,6 +412,25 @@ async def delete_all_user_reminders(user_id: int) -> int:
         return count
 
 
+async def delete_break_reminders(user_id: int) -> int:
+    """Deactivate break timer reminders for a user. Returns count of reminders deleted."""
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Reminder)
+            .where(Reminder.user_id == user_id)
+            .where(Reminder.text.like("BREAK_TIMER:%"))
+            .where(Reminder.is_done.is_(False))
+        )
+        reminders = result.scalars().all()
+
+        count = len(reminders)
+        for reminder in reminders:
+            reminder.is_done = True
+
+        await session.commit()
+        return count
+
+
 async def split_midnight_sessions() -> int:
     """Split sessions that span across midnight (users are in GMT+3). Returns count of sessions split."""
     now = datetime.utcnow()
