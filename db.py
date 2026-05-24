@@ -855,7 +855,7 @@ async def get_user_state_info(user_id: int) -> Optional[dict]:
             .where(UserTask.user_id == user_id)
             .order_by(UserTask.id.desc())
         )
-        last_task = task_result.scalar_one_or_none()
+        last_task = task_result.scalars().first()
         last_task_name = decrypt_value(last_task.task_name_encrypted) if last_task else None
 
         # Get last session (even if not closed)
@@ -864,7 +864,7 @@ async def get_user_state_info(user_id: int) -> Optional[dict]:
             .where(Session.user_id == user_id)
             .order_by(Session.start_time.desc())
         )
-        last_session = session_result.scalar_one_or_none()
+        last_session = session_result.scalars().first()
 
         return {
             "current_state": current_status.current_state if current_status else None,
