@@ -732,3 +732,89 @@ async def get_user_today_sessions(user_id: int) -> tuple[list[tuple[str, int]], 
             break_seconds += int((now - open_break.start_time).total_seconds())
 
         return list(task_durations.items()), break_seconds
+
+
+async def get_weekly_sessions() -> list[dict]:
+    """Get this week's (Monday 00:00 to Sunday 23:59 GMT+3) work sessions for all users.
+    Returns list of dicts: {user_id, user_name, work_seconds, break_seconds, roles}"""
+    now = datetime.utcnow()
+
+    # Find Monday of this week in GMT+3
+    # Monday 00:00 GMT+3 = Sunday 21:00 UTC
+    # Sunday 23:59 GMT+3 = Sunday 20:59 UTC
+    gmt3_now = now + timedelta(hours=3)
+    days_since_monday = gmt3_now.weekday()
+    monday_gmt3 = gmt3_now - timedelta(days=days_since_monday, hours=now.hour, minutes=now.minute, seconds=now.second)
+    monday_utc = monday_gmt3 - timedelta(hours=3)
+
+    # Sunday 23:59 GMT+3 = Sunday 20:59 UTC (same day as Monday, 6 days and 23:59 later)
+    sunday_utc = monday_utc + timedelta(days=6, hours=23, minutes=59, seconds=59)
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Session, User)
+            .join(User, Session.user_id == User.id)
+            .where(Session.start_time >= monday_utc)
+            .where(Session.start_time <= sunday_utc)
+            .order_by(User.id, Session.start_time)
+        )
+        session_data = result.all()
+
+        # Group by user
+        user_data = {}
+        for session, user in session_data:
+            if user.id not in user_data:
+                user_data[user.id] = {
+                    "user_id": user.id,
+                    "user_name": user.name or f"User {user.id}",
+                    "work_seconds": 0,
+                    "break_seconds": 0,
+                    "roles": [r.strip() for r in user.roles.split(",")]
+                }
+
+            # Calculate duration - use now for open sessions
+            end_time = session.end_time if session.end_time else now
+            duration = int((end_time - session.start_time).total_seconds())
+
+            if session.task_name_encrypted == "Break":
+                user_data[user.id]["break_seconds"] += duration
+            else:
+                user_data[user.id]["work_seconds"] += duration
+
+        return list(user_data.values())
+
+
+async def get_user_weekly_sessions(user_id: int) -> tuple[int, int]:
+    """Get this week's work and break duration for a user.
+    Returns: (work_seconds, break_seconds)"""
+    now = datetime.utcnow()
+
+    # Find Monday of this week in GMT+3
+    gmt3_now = now + timedelta(hours=3)
+    days_since_monday = gmt3_now.weekday()
+    monday_gmt3 = gmt3_now - timedelta(days=days_since_monday, hours=now.hour, minutes=now.minute, seconds=now.second)
+    monday_utc = monday_gmt3 - timedelta(hours=3)
+    sunday_utc = monday_utc + timedelta(days=6, hours=23, minutes=59, seconds=59)
+
+    async with async_session_factory() as session:
+        result = await session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .where(Session.start_time >= monday_utc)
+            .where(Session.start_time <= sunday_utc)
+        )
+        sessions = result.scalars().all()
+
+        work_seconds = 0
+        break_seconds = 0
+
+        for s in sessions:
+            end_time = s.end_time if s.end_time else now
+            duration = int((end_time - s.start_time).total_seconds())
+
+            if s.task_name_encrypted == "Break":
+                break_seconds += duration
+            else:
+                work_seconds += duration
+
+        return work_seconds, break_seconds

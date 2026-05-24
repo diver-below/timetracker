@@ -10,7 +10,7 @@ from config import validate_config, WEBHOOK_URL, LISTEN_PORT, YANDEX_OAUTH_TOKEN
 from db import engine, init_db, get_due_reminders, mark_reminder_done, split_midnight_sessions, async_session_factory
 from handlers import process_message
 from bot_api import parse_webhook_payload, send_message
-from reports import send_daily_report_to_manager, get_managers_logins
+from reports import send_daily_report_to_manager, get_managers_logins, send_weekly_report_to_manager
 
 
 async def webhook_handler(request: web.Request) -> web.Response:
@@ -141,6 +141,36 @@ async def daily_report_checker():
         await asyncio.sleep(60)
 
 
+async def weekly_report_checker():
+    """Send weekly reports to all managers at 21:01 UTC Monday (00:01 GMT+3 Monday)."""
+    logger.info("Weekly report checker started")
+    last_run_utc_week = None
+
+    while True:
+        try:
+            now = datetime.utcnow()
+
+            # Run once per week, Monday 21:01-21:05 UTC (which is 00:01-00:05 GMT+3 Monday)
+            if now.weekday() == 0 and now.hour == 21 and 1 <= now.minute < 5:
+                current_week = now.isocalendar()[1]  # ISO week number
+                if last_run_utc_week != current_week:
+                    managers = await get_managers_logins()
+                    logger.info(f"Sending weekly reports to {len(managers)} managers")
+
+                    for user_id, user_login in managers:
+                        try:
+                            await send_weekly_report_to_manager(user_login, user_id)
+                        except Exception as e:
+                            logger.error(f"Failed to send weekly report to {user_login}: {e}", exc_info=True)
+
+                    last_run_utc_week = current_week
+
+        except Exception as e:
+            logger.error(f"Error in weekly report checker: {e}", exc_info=True)
+
+        await asyncio.sleep(60)
+
+
 async def poll_pending_updates():
     """Get pending updates that were missed while bot was offline"""
     import aiohttp
@@ -224,6 +254,7 @@ async def on_startup(app: web.Application):
     app["reminder_task"] = asyncio.create_task(reminder_checker())
     app["midnight_session_task"] = asyncio.create_task(midnight_session_checker())
     app["daily_report_task"] = asyncio.create_task(daily_report_checker())
+    app["weekly_report_task"] = asyncio.create_task(weekly_report_checker())
 
 
 async def on_shutdown(app: web.Application):
@@ -245,6 +276,13 @@ async def on_shutdown(app: web.Application):
         app["daily_report_task"].cancel()
         try:
             await app["daily_report_task"]
+        except asyncio.CancelledError:
+            pass
+
+    if "weekly_report_task" in app:
+        app["weekly_report_task"].cancel()
+        try:
+            await app["weekly_report_task"]
         except asyncio.CancelledError:
             pass
 
