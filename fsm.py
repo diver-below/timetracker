@@ -26,9 +26,9 @@ class FSM:
 
     def is_valid_transition(self, current_state: str, action: str) -> bool:
         transitions = {
-            UserState.IDLE.value: ["/start", "Начать работу", "/new_rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
-            UserState.WORKING.value: ["/start", "Закончить", "Перерыв", "Сменить задачу", "/new_rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
-            UserState.ON_BREAK.value: ["/start", "Вернуться", "/new_rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
+            UserState.IDLE.value: ["/start", "Начать работу", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
+            UserState.WORKING.value: ["/start", "Закончить", "Перерыв", "Сменить задачу", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
+            UserState.ON_BREAK.value: ["/start", "Вернуться", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
             UserState.ENTERING_TASK.value: ["/start", "Отмена", "/my_id"],
             UserState.ENTERING_REMINDER.value: ["/start", "Отмена", "/my_id"],
         }
@@ -45,17 +45,17 @@ class FSM:
         state_actions = {
             UserState.IDLE.value: {
                 "Начать работу": UserState.ENTERING_TASK.value,
-                "/new_rem": UserState.ENTERING_REMINDER.value,
+                "/rem": UserState.ENTERING_REMINDER.value,
             },
             UserState.WORKING.value: {
                 "Закончить": UserState.IDLE.value,
                 "Перерыв": UserState.ON_BREAK.value,
                 "Сменить задачу": UserState.ENTERING_TASK.value,
-                "/new_rem": UserState.ENTERING_REMINDER.value,
+                "/rem": UserState.ENTERING_REMINDER.value,
             },
             UserState.ON_BREAK.value: {
                 "Вернуться": UserState.WORKING.value,
-                "/new_rem": UserState.ENTERING_REMINDER.value,
+                "/rem": UserState.ENTERING_REMINDER.value,
             },
             UserState.ENTERING_TASK.value: {
                 "Отмена": UserState.IDLE.value,

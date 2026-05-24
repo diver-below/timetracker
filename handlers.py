@@ -778,7 +778,7 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_return_from_break(user_login, user.id)
         elif action == "Сменить задачу":
             await handle_switch_task(user_login, user.id)
-        elif action == "/new_rem":
+        elif action == "/rem":
             await handle_new_reminder_start(user_login, user.id)
         elif action == "/list_rem":
             await handle_list_reminders(user_login, user.id)
