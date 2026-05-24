@@ -614,7 +614,7 @@ async def update_user_name(user_id: int, name: str):
 
 async def get_all_users_today_sessions() -> list[dict]:
     """Get today's (in GMT+3) work sessions for all users.
-    Returns list of dicts: {user_id, user_name, task_durations, break_seconds, is_working, current_task}"""
+    Returns list of dicts: {user_id, user_name, task_durations, break_seconds, is_working, current_task, roles}"""
     now = datetime.utcnow()
     # Today in GMT+3
     user_date = (now + timedelta(hours=3)).date()
@@ -645,7 +645,8 @@ async def get_all_users_today_sessions() -> list[dict]:
                     "task_durations": {},
                     "break_seconds": 0,
                     "is_working": False,
-                    "current_task": None
+                    "current_task": None,
+                    "roles": [r.strip() for r in user.roles.split(",")]
                 }
 
             # Calculate duration - use now for open sessions
@@ -672,3 +673,62 @@ async def get_all_users_today_sessions() -> list[dict]:
                     user_data[user.id]["current_task"] = task_name
 
         return list(user_data.values())
+
+
+async def get_user_today_sessions(user_id: int) -> tuple[list[tuple[str, int]], int]:
+    """Get today's (in GMT+3) work sessions per task and total break duration in seconds.
+    Returns: (list of (task_name, duration_seconds), total_break_seconds)"""
+    now = datetime.utcnow()
+    # Today in GMT+3
+    user_date = (now + timedelta(hours=3)).date()
+    # Today's midnight and tomorrow's midnight in UTC
+    midnight_start = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0) - timedelta(days=1)
+    midnight_end = datetime(user_date.year, user_date.month, user_date.day, 21, 0, 0)
+
+    async with async_session_factory() as session:
+        # Get all work sessions (not Break) for today
+        sessions_result = await session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .where(Session.start_time >= midnight_start)
+            .where(Session.start_time < midnight_end)
+            .order_by(Session.start_time)
+        )
+        sessions = sessions_result.scalars().all()
+
+        # Group by task name
+        task_durations = {}
+        for s in sessions:
+            end_time = s.end_time if s.end_time else now
+            task_name = decrypt_value(s.task_name_encrypted)
+            if task_name == "Break":
+                continue
+
+            duration = int((end_time - s.start_time).total_seconds())
+            task_durations[task_name] = task_durations.get(task_name, 0) + duration
+
+        # Get total break duration
+        break_result = await session.execute(
+            select(func.extract('epoch', func.sum(Session.end_time - Session.start_time)))
+            .where(Session.user_id == user_id)
+            .where(Session.start_time >= midnight_start)
+            .where(Session.start_time < midnight_end)
+            .where(Session.end_time.isnot(None))
+            .where(Session.task_name_encrypted == "Break")
+        )
+        break_seconds = int(break_result.scalar() or 0)
+
+        # Add open break duration
+        open_break_result = await session.execute(
+            select(Session)
+            .where(Session.user_id == user_id)
+            .where(Session.start_time >= midnight_start)
+            .where(Session.start_time < midnight_end)
+            .where(Session.end_time.is_(None))
+            .where(Session.task_name_encrypted == "Break")
+        )
+        open_break = open_break_result.scalar_one_or_none()
+        if open_break:
+            break_seconds += int((now - open_break.start_time).total_seconds())
+
+        return list(task_durations.items()), break_seconds

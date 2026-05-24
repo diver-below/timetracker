@@ -1,6 +1,6 @@
 from datetime import datetime, timedelta
 
-from db import get_all_users_today_sessions
+from db import get_all_users_today_sessions, get_user_today_sessions
 from bot_api import send_message
 from config import logger
 
@@ -69,13 +69,94 @@ def generate_daily_report(users_data: list[dict]) -> str:
     return "\n".join(lines).strip()
 
 
-async def send_daily_report_to_manager(user_login: str, user_id: int):
-    """Send daily report to a manager user."""
-    users_data = await get_all_users_today_sessions()
-    report = generate_daily_report(users_data)
+def generate_team_report(users_data: list[dict]) -> str:
+    """Generate team daily report excluding managers."""
+    now = datetime.utcnow()
+    local_date = (now + timedelta(hours=3)).strftime("%d.%m.%Y")
+    local_time = (now + timedelta(hours=3)).strftime("%H:%M")
 
-    await send_message(user_login, report)
-    logger.info(f"Daily report sent to manager {user_login}")
+    lines = [f"📊 Ежедневный отчёт команды за {local_date} ({local_time}):", ""]
+
+    # Filter out managers
+    team_data = [
+        u for u in users_data
+        if "manager" not in u.get("roles", [])
+    ]
+
+    if not team_data:
+        lines.append("За сегодня данные отсутствуют.")
+        return "\n".join(lines)
+
+    for user_data in sorted(team_data, key=lambda x: x["user_name"].lower()):
+        user_name = user_data["user_name"]
+        task_durations = user_data["task_durations"]
+        break_seconds = user_data["break_seconds"]
+        is_working = user_data.get("is_working", False)
+        current_task = user_data.get("current_task")
+        roles = user_data.get("roles", [])
+
+        # Status indicator
+        status = "● работает" if is_working else ""
+        if status:
+            user_line = f"👤 {user_name} {status}"
+            if current_task and current_task != "Break":
+                user_line += f" (на: {current_task})"
+            lines.append(user_line)
+        else:
+            lines.append(f"👤 {user_name}:")
+
+        # Add role badge for admins
+        if "admin" in roles:
+            lines.append(f"  🏷 admin")
+
+        if task_durations:
+            for task, duration in sorted(task_durations.items()):
+                lines.append(f"  - {task} {format_duration(duration)}")
+        else:
+            lines.append("  - Работ не было")
+
+        if break_seconds > 0:
+            lines.append(f"  - Перерыв {format_duration(break_seconds)}")
+
+        lines.append("")
+
+    return "\n".join(lines).strip()
+
+
+def generate_personal_report(task_durations: list[tuple[str, int]], break_seconds: int) -> str:
+    """Generate personal daily report like when user ends work."""
+    lines = []
+
+    if task_durations:
+        lines.append("Итоги за сегодня:")
+        for task, duration in task_durations:
+            lines.append(f"- {task} {format_duration(duration)}")
+    else:
+        lines.append("За сегодня работы не было.")
+
+    if break_seconds > 0:
+        lines.append(f"- Перерыв {format_duration(break_seconds)}")
+
+    lines.append("")
+    lines.append("Хорошего дня!")
+
+    return "\n".join(lines)
+
+
+async def send_daily_report_to_manager(user_login: str, user_id: int):
+    """Send daily report to a manager user (team + personal)."""
+    users_data = await get_all_users_today_sessions()
+
+    # Send team report
+    team_report = generate_team_report(users_data)
+    await send_message(user_login, team_report)
+    logger.info(f"Team daily report sent to manager {user_login}")
+
+    # Send personal report
+    task_durations, break_seconds = await get_user_today_sessions(user_id)
+    personal_report = generate_personal_report(task_durations, break_seconds)
+    await send_message(user_login, personal_report)
+    logger.info(f"Personal daily report sent to manager {user_login}")
 
 
 async def get_managers_logins() -> list[tuple[int, str]]:
