@@ -202,6 +202,10 @@ async def workday_reminder_checker():
     """Check and send workday reminders every minute."""
     logger.info("Workday reminder checker started")
     fsm = FSM()
+    import db as db_module
+
+    # Track sent reminders per user per day: {user_id: {start_sent: "YYYY-MM-DD", end_sent: "YYYY-MM-DD"}}
+    workday_reminders_sent = {}
 
     while True:
         try:
@@ -211,6 +215,7 @@ async def workday_reminder_checker():
                 continue
 
             users_for_reminders = await get_users_for_workday_reminders()
+            today = (datetime.utcnow() + timedelta(hours=3)).strftime("%Y-%m-%d")
 
             if not users_for_reminders:
                 await asyncio.sleep(60)
@@ -227,6 +232,15 @@ async def workday_reminder_checker():
                         logger.debug(f"User {user_login} is on vacation, skipping reminder")
                         continue
 
+                    # Initialize tracking for this user
+                    if user_id not in workday_reminders_sent:
+                        workday_reminders_sent[user_id] = {"start_sent": None, "end_sent": None}
+
+                    # Check if already sent today
+                    sent_date = workday_reminders_sent[user_id].get(f"{reminder_type}_sent")
+                    if sent_date == today:
+                        continue
+
                     if reminder_type == "start":
                         # Check if user has started work today
                         has_worked = await has_work_sessions_today(user_id)
@@ -238,6 +252,7 @@ async def workday_reminder_checker():
                                 f"⏰ Время начать работу! Ваше рабочее время: {start_time.strftime('%H:%M')}",
                                 keyboard
                             )
+                            workday_reminders_sent[user_id]["start_sent"] = today
                             logger.info(f"Sent start work reminder to {user_login}")
 
                     elif reminder_type == "end":
@@ -251,6 +266,7 @@ async def workday_reminder_checker():
                                 f"⏰ Рабочее время окончено! Не забудьте завершить задачу. Ваше время: до {end_time.strftime('%H:%M')}",
                                 keyboard
                             )
+                            workday_reminders_sent[user_id]["end_sent"] = today
                             logger.info(f"Sent end work reminder to {user_login}")
 
                 except Exception as e:
