@@ -9,7 +9,7 @@ from db import (
     create_session, end_session, end_break_session, end_task_session, save_task, get_user_tasks,
     create_reminder, get_active_reminders, delete_all_user_reminders, delete_break_reminders, decrypt_value,
     get_current_encrypted_task, update_user_name, get_task_name_by_id,
-    get_user_roles, has_role, add_role, get_user_by_yandex_login, get_user_by_id,
+    get_user_roles, has_role, add_role, remove_role, get_user_by_yandex_login, get_user_by_id,
     get_today_sessions, get_user_state_info, update_user_work_times, toggle_vacation
 )
 from fsm import FSM, NO_KEYBOARD, WORKING_KEYBOARD, IDLE_KEYBOARD, ON_BREAK_KEYBOARD, CANCEL_KEYBOARD
@@ -430,6 +430,51 @@ async def handle_give_role(user_login: str, user_id: int, args: str):
         logger.info(f"Admin {user_login} failed to add role '{role}' to user {target_user_id} - already has role")
 
 
+async def handle_delete_role(user_login: str, user_id: int, args: str):
+    """Admin only: /delete_role <user_id> <role>"""
+    # Check if user has admin role
+    is_admin = await has_role(user_id, "admin")
+    if not is_admin:
+        await send_message(user_login, "У вас нет прав для этой команды.")
+        logger.warning(f"Non-admin user {user_login} tried to use /delete_role")
+        return
+
+    # Parse arguments
+    parts = args.strip().split()
+    if len(parts) != 2:
+        await send_message(user_login, "Формат: /delete_role <user_id> <role>\nДоступные роли: admin, manager\nРоль employee не может быть удалена.")
+        return
+
+    # Validate user_id is a number
+    try:
+        target_user_id = int(parts[0])
+    except ValueError:
+        await send_message(user_login, "Неверный формат user_id. Должно быть число.")
+        return
+
+    # Validate role
+    role = parts[1].lower()
+    if role not in ("admin", "manager"):
+        await send_message(user_login, "Неверная роль. Доступные: admin, manager\nРоль employee не может быть удалена.")
+        return
+
+    # Validate target user exists
+    target_user = await get_user_by_id(target_user_id)
+    if not target_user:
+        await send_message(user_login, f"Пользователь с ID {target_user_id} не найден.")
+        logger.info(f"Admin {user_login} tried to delete role from non-existent user {target_user_id}")
+        return
+
+    # Remove role from target user
+    success = await remove_role(target_user_id, role)
+    if success:
+        await send_message(user_login, f"Роль '{role}' удалена у пользователя {target_user_id} ({target_user.name}).")
+        logger.info(f"Admin {user_login} removed role '{role}' from user {target_user_id}")
+    else:
+        await send_message(user_login, f"Не удалось удалить роль. У пользователя {target_user_id} нет роли '{role}'.")
+        logger.info(f"Admin {user_login} failed to remove role '{role}' from user {target_user_id} - doesn't have role")
+
+
 async def handle_set_work_time_command(user_login: str, user_id: int):
     setting_work_time_users.add(user_login)
     await send_message(
@@ -788,6 +833,8 @@ async def process_message(user_login: str, chat_id: str, text: str):
             await handle_my_id(user_login, user.id)
         elif action.startswith("/give_role"):
             await handle_give_role(user_login, user.id, action.replace("/give_role", ""))
+        elif action.startswith("/delete_role"):
+            await handle_delete_role(user_login, user.id, action.replace("/delete_role", ""))
         elif action.startswith("/state"):
             await handle_state(user_login, user.id, action.replace("/state", ""))
         elif action == "/setworktime":
