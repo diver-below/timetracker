@@ -26,9 +26,9 @@ class FSM:
 
     def is_valid_transition(self, current_state: str, action: str) -> bool:
         transitions = {
-            UserState.IDLE.value: ["/start", "Начать работу", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
-            UserState.WORKING.value: ["/start", "Закончить", "Перерыв", "Сменить задачу", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
-            UserState.ON_BREAK.value: ["/start", "Вернуться", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/state", "/setworktime", "/vacation"],
+            UserState.IDLE.value: ["/start", "Начать работу", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/delete_role", "/state", "/setworktime", "/vacation"],
+            UserState.WORKING.value: ["/start", "Закончить", "Перерыв", "Сменить задачу", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/delete_role", "/state", "/setworktime", "/vacation"],
+            UserState.ON_BREAK.value: ["/start", "Вернуться", "/rem", "/list_rem", "/del_rem", "/my_id", "/give_role", "/delete_role", "/state", "/setworktime", "/vacation"],
             UserState.ENTERING_TASK.value: ["/start", "Отмена", "/my_id"],
             UserState.ENTERING_REMINDER.value: ["/start", "Отмена", "/my_id"],
         }
