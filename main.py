@@ -169,7 +169,7 @@ async def daily_report_checker():
 
 
 async def weekly_report_checker():
-    """Send weekly reports to all managers at 21:01 UTC Monday (00:01 GMT+3 Monday)."""
+    """Send weekly reports to all managers at 21:01 UTC Sunday (00:01 GMT+3 Monday)."""
     logger.info("Weekly report checker started")
     last_run_utc_week = None
 
@@ -177,8 +177,8 @@ async def weekly_report_checker():
         try:
             now = datetime.utcnow()
 
-            # Run once per week, Monday 21:01-21:05 UTC (which is 00:01-00:05 GMT+3 Monday)
-            if now.weekday() == 0 and now.hour == 21 and 1 <= now.minute < 5:
+            # Run once per week, Sunday 21:01-21:05 UTC (which is 00:01-00:05 GMT+3 Monday)
+            if now.weekday() == 6 and now.hour == 21 and 1 <= now.minute < 5:
                 current_week = now.isocalendar()[1]  # ISO week number
                 if last_run_utc_week != current_week:
                     managers = await get_managers_logins()
