@@ -578,13 +578,11 @@ async def handle_state(user_login: str, user_id: int, args: str):
     logger.info(f"Admin {user_login} requested state for user {target_user_id}")
 
 
-async def handle_cancel(user_login: str, user_id: int, from_state: str):
+async def handle_cancel(user_login: str, user_id: int):
     # Determine what state to return to based on what we were entering
     is_canceling_task = user_login in entering_task_users
     is_canceling_reminder = user_login in entering_reminder_users
-
-    # Check if user was switching tasks
-    was_switching_task = user_login in switching_task_context
+    is_switching_task = user_login in switching_task_context
 
     if is_canceling_task:
         entering_task_users.discard(user_login)
@@ -596,18 +594,30 @@ async def handle_cancel(user_login: str, user_id: int, from_state: str):
     current_state, current_task_id = await get_current_state(user_id)
 
     # For task entry: determine if returning to WORKING (had task) or IDLE (starting fresh)
-    if from_state == UserState.ENTERING_TASK.value:
-        if current_state == UserState.WORKING.value and current_task_id:
+    if is_canceling_task and is_switching_task:
+        # User was switching tasks, restore the old task
+        old_task_id, old_task_name = switching_task_context.pop(user_login, (None, None))
+        if old_task_name:
             return_state = UserState.WORKING.value
+            # Close any dangling sessions first
+            await end_session(user_id)
+            # Restore the old task session
+            await create_session(user_id, old_task_name)
+            message = f"Действие отменено. Продолжаем задачу «{old_task_name}»."
+            logger.info(f"User {user_login} cancelled task switch, restored task: {old_task_name}")
         else:
             return_state = UserState.IDLE.value
-            await send_message(user_login, "Работа не начата. Чтобы начать работу введите название задачи:", CANCEL_KEYBOARD)
-            logger.info(f"User {user_login} cancelled starting work")
-            return
+            message = "Действие отменено."
+            logger.info(f"User {user_login} cancelled task switch with no old task")
+    elif is_canceling_task and current_state != UserState.WORKING.value:
+        # User was starting fresh task, not switching
+        return_state = UserState.IDLE.value
+        message = "Действие отменено. Чтобы начать работу, введите название задачи или используйте кнопку:"
+        logger.info(f"User {user_login} cancelled starting work")
     else:
         return_state = current_state if current_state else UserState.IDLE.value
-
-    # Don't call update_state - cancel doesn't change CurrentStatus
+        message = "Действие отменено."
+        logger.info(f"User {user_login} cancelled action, returned to {return_state}")
 
     # State names in Russian
     state_names = {
@@ -615,34 +625,19 @@ async def handle_cancel(user_login: str, user_id: int, from_state: str):
         UserState.WORKING.value: "работает",
         UserState.ON_BREAK.value: "на перерыве",
     }
-
-    # Build message
-    message = "Действие отменено. Текущий статус: " + state_names.get(return_state, return_state)
-
-    # Restore old task session if user was switching tasks
-    if was_switching_task and return_state == UserState.WORKING.value:
-        old_task_id, old_task_name = switching_task_context.pop(user_login, (None, None))
-        if old_task_name:
-            # Close any dangling sessions first
-            await end_session(user_id)
-            # Restore the old task session
-            await create_session(user_id, old_task_name)
-            message += f"\nПродолжаем задачу «{old_task_name}»."
-            logger.info(f"User {user_login} cancelled task switch, restored task: {old_task_name}")
-    elif user_login in switching_task_context:
-        switching_task_context.pop(user_login, None)
+    if return_state in state_names:
+        message += f" Текущий статус: {state_names[return_state]}"
 
     # If working, show current task
-    if return_state == UserState.WORKING.value:
+    if return_state == UserState.WORKING.value and not is_switching_task:
         task_name = await get_task_name_by_id(current_task_id) if current_task_id else None
-        if task_name and not was_switching_task:
+        if task_name:
             message += f"\nТекущая задача: {task_name}"
 
     # Get appropriate keyboard
     keyboard = fsm.get_keyboard_for_state(return_state)
 
     await send_message(user_login, message, keyboard)
-    logger.info(f"User {user_login} cancelled action from {from_state}, returned to {return_state}")
 
 
 async def process_message(user_login: str, chat_id: str, text: str):
@@ -791,14 +786,14 @@ async def process_message(user_login: str, chat_id: str, text: str):
 
         if user_login in entering_task_users:
             if text == "Отмена":
-                await handle_cancel(user_login, user.id, UserState.ENTERING_TASK.value)
+                await handle_cancel(user_login, user.id)
             else:
                 await handle_task_entry(user_login, user.id, text)
             return
 
         if user_login in entering_reminder_users:
             if text == "Отмена":
-                await handle_cancel(user_login, user.id, UserState.ENTERING_REMINDER.value)
+                await handle_cancel(user_login, user.id)
             else:
                 await handle_reminder_entry(user_login, user.id, text)
             return

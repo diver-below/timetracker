@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Migrate database schema from BigInteger to String for yandex_user_login."""
 
+
+
 import asyncio
 import sys
 import os

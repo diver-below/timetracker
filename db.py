@@ -49,8 +49,6 @@ class UserState(str, Enum):
     IDLE = "idle"
     WORKING = "working"
     ON_BREAK = "on_break"
-    ENTERING_TASK = "entering_task"
-    ENTERING_REMINDER = "entering_reminder"
 
 
 class User(Base):
